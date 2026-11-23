@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Гематология</title>
+  
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#f5f5f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Гематология">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+  <div class="app-shell">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="title-row">
+          <h1 class="nav-title">Источники</h1>
+          <div id="itemCount" class="header-count" aria-live="polite">0 записей</div>
+        </div>
+
+        <div class="search-container">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+          </svg>
+          <input 
+            type="search" 
+            id="searchInput" 
+            class="search-input" 
+            placeholder="Поиск по диагнозам, генам, схемам..."
+            aria-label="Поиск по диагнозам, генам, мутациям и схемам лечения"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button class="search-clear-btn" id="clearSearchBtn" aria-label="Очистить поисковый запрос">
+            <svg viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Segmented Navigation Chips -->
+        <div class="segmented-control" id="segmentedControl" role="tablist" aria-label="Фильтр по категориям">
+          <button class="segment-btn active" data-type="all" role="tab" aria-selected="true">Все</button>
+          <button class="segment-btn" data-type="nosology" role="tab" aria-selected="false">Нозологии</button>
+          <button class="segment-btn" data-type="protocol" role="tab" aria-selected="false">Протоколы</button>
+          <button class="segment-btn" data-type="criteria" role="tab" aria-selected="false">Критерии</button>
+        </div>
+
+        <!-- Book Filter Bar -->
+        <div class="book-filter-scroll" id="bookFilterScroll" role="tablist" aria-label="Фильтр по книгам">
+          <!-- Наполняется динамически через JS -->
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content: Articles & Search -->
+    <main class="content-viewport" id="searchView">
+      <div class="results-grid" id="articlesList">
+        <!-- Карточки наполняются JS -->
+      </div>
+    </main>
+
+    <!-- Calculators View -->
+    <main class="content-viewport" id="calcView" style="display: none;">
+      <div class="results-grid calc-groups" id="calcGroups"></div>
+      <div class="calc-grid" id="calcGrid">
+        <!-- BSA Calculator Card -->
+        <div class="panel-card" data-calc-group="body">
+          <div class="panel-header">
+            <span class="panel-label">Формула Mosteller</span>
+            <h2 class="panel-title">Площадь поверхности тела (BSA)</h2>
+          </div>
+
+          <div class="input-grid">
+            <div class="field-item">
+              <label class="field-label" for="bsaHeight">Рост (см)</label>
+              <input type="number" id="bsaHeight" class="text-input" placeholder="175" inputmode="decimal" oninput="calculateBSA()">
+            </div>
+            <div class="field-item">
+              <label class="field-label" for="bsaWeight">Вес (кг)</label>
+              <input type="number" id="bsaWeight" class="text-input" placeholder="70" inputmode="decimal" oninput="calculateBSA()">
+            </div>
+          </div>
+
+          <div class="field-item" style="margin-top: 14px;">
+            <label class="field-label" for="bsaDose">Доза по схеме (мг/м²)</label>
+            <input type="number" id="bsaDose" class="text-input" placeholder="Например: 100" inputmode="decimal" oninput="calculateBSA()">
+          </div>
+
+          <div class="metric-display-row">
+            <div class="metric-block">
+              <div class="metric-caption">BSA</div>
+              <div class="metric-number" id="bsaResult">0.00 <span class="metric-unit">м²</span></div>
+            </div>
+            <div class="metric-block align-right">
+              <div class="metric-caption">Расчетная доза</div>
+              <div class="metric-number" id="bsaTotalDose">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BMI Calculator Card -->
+        <div class="panel-card" data-calc-group="body">
+          <div class="panel-header">
+            <span class="panel-label">Классификация ВОЗ</span>
+            <h2 class="panel-title">Индекс массы тела (ИМТ)</h2>
+          </div>
+
+          <div class="input-grid">
+            <div class="field-item">
+              <label class="field-label" for="bmiHeight">Рост (см)</label>
+              <input type="number" id="bmiHeight" class="text-input" placeholder="175" inputmode="decimal" oninput="calculateBMI()">
+            </div>
+            <div class="field-item">
+              <label class="field-label" for="bmiWeight">Вес (кг)</label>
+              <input type="number" id="bmiWeight" class="text-input" placeholder="70" inputmode="decimal" oninput="calculateBMI()">
+            </div>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 14px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">ИМТ</div>
+              <div class="metric-number" id="bmiResult">0.0 <span class="metric-unit">кг/м²</span></div>
+            </div>
+            <div id="bmiStatus" class="status-callout">Введите рост и вес для расчета</div>
+          </div>
+        </div>
+
+        <!-- ANC Calculator Card -->
+        <div class="panel-card" data-calc-group="labs">
+          <div class="panel-header">
+            <span class="panel-label">Шкала CTCAE v5.0</span>
+            <h2 class="panel-title">Абсолютное число нейтрофилов (АЧН)</h2>
+          </div>
+
+          <div class="field-item">
+            <label class="field-label" for="ancWBC">Лейкоциты (WBC, ×10⁹/л)</label>
+            <input type="number" step="0.1" id="ancWBC" class="text-input" placeholder="2.4" inputmode="decimal" oninput="calculateANC()">
+          </div>
+
+          <div class="input-grid" style="margin-top: 14px;">
+            <div class="field-item">
+              <label class="field-label" for="ancSegs">Сегментоядерные (%)</label>
+              <input type="number" id="ancSegs" class="text-input" placeholder="25" inputmode="decimal" oninput="calculateANC()">
+            </div>
+            <div class="field-item">
+              <label class="field-label" for="ancBands">Палочкоядерные (%)</label>
+              <input type="number" id="ancBands" class="text-input" placeholder="5" inputmode="decimal" oninput="calculateANC()">
+            </div>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">АЧН</div>
+              <div class="metric-number" id="ancResult">0.00 <span class="metric-unit">×10⁹/л</span></div>
+            </div>
+            <div id="ancRisk" class="status-callout">Введите показатели общего анализа крови</div>
+          </div>
+        </div>
+
+        <!-- CrCl Calculator Card (Cockcroft-Gault) -->
+        <div class="panel-card" data-calc-group="labs">
+          <div class="panel-header">
+            <span class="panel-label">Формула Cockcroft-Gault</span>
+            <h2 class="panel-title">Клиренс креатинина (CrCl)</h2>
+          </div>
+
+          <div class="field-item" style="margin-bottom: 12px;">
+            <label class="field-label">Пол пациента</label>
+            <div class="segmented-control" style="background: var(--bg-input);">
+              <button type="button" class="segment-btn active" id="genderMale" onclick="setCrClGender('male')">Мужской</button>
+              <button type="button" class="segment-btn" id="genderFemale" onclick="setCrClGender('female')">Женский</button>
+            </div>
+          </div>
+
+          <div class="input-grid">
+            <div class="field-item">
+              <label class="field-label" for="crclAge">Возраст (лет)</label>
+              <input type="number" id="crclAge" class="text-input" placeholder="65" inputmode="numeric" oninput="calculateCrCl()">
+            </div>
+            <div class="field-item">
+              <label class="field-label" for="crclWeight">Вес (кг)</label>
+              <input type="number" id="crclWeight" class="text-input" placeholder="70" inputmode="decimal" oninput="calculateCrCl()">
+            </div>
+          </div>
+
+          <div class="field-item" style="margin-top: 14px;">
+            <label class="field-label" for="crclCreatinine">Креатинин сыворотки (мкмоль/л)</label>
+            <input type="number" id="crclCreatinine" class="text-input" placeholder="Например: 115" inputmode="decimal" oninput="calculateCrCl()">
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">Клиренс креатинина</div>
+              <div class="metric-number" id="crclResult">0.0 <span class="metric-unit">мл/мин</span></div>
+            </div>
+            <div id="crclAdvice" class="status-callout">Введите возраст, вес и уровень креатинина</div>
+          </div>
+        </div>
+
+        <!-- 4T Score Calculator Card (HIT / ГИТ) -->
+        <div class="panel-card" data-calc-group="risk" style="grid-column: 1 / -1;">
+          <div class="panel-header">
+            <span class="panel-label">Диагностическая шкала</span>
+            <h2 class="panel-title">Шкала 4T: Диагностика ГИТ</h2>
+          </div>
+
+          <div class="four-t-container">
+            <!-- 1. Thrombocytopenia -->
+            <div class="four-t-group">
+              <label class="field-label">1. Степень падения тромбоцитов</label>
+              <select id="fourT1" class="text-input" onchange="calculate4T()">
+                <option value="2">Падение >50% и надир ≥20 × 10⁹/л (2 балла)</option>
+                <option value="1">Падение 30–50% или надир 10–19 × 10⁹/л (1 балл)</option>
+                <option value="0" selected>Падение <30% или надир <10 × 10⁹/л (0 баллов)</option>
+              </select>
+            </div>
+
+            <!-- 2. Timing -->
+            <div class="four-t-group">
+              <label class="field-label">2. Сроки падения от начала гепарина</label>
+              <select id="fourT2" class="text-input" onchange="calculate4T()">
+                <option value="2">5–10 день (или ≤1 дня при гепарине в анамнезе за 30 дней) (2 балла)</option>
+                <option value="1">После 10 дня или сроки неясны (1 балл)</option>
+                <option value="0" selected>До 4 дня без гепарина в анамнезе (0 баллов)</option>
+              </select>
+            </div>
+
+            <!-- 3. Thrombosis -->
+            <div class="four-t-group">
+              <label class="field-label">3. Тромбоз или другие осложнения</label>
+              <select id="fourT3" class="text-input" onchange="calculate4T()">
+                <option value="2">Новый тромбоз, некроз кожи в месте инъекции (2 балла)</option>
+                <option value="1">Прогрессирующий тромбоз, эритематозные пятна (1 балл)</option>
+                <option value="0" selected>Нет тромбозов и симптомов (0 баллов)</option>
+              </select>
+            </div>
+
+            <!-- 4. oTher causes -->
+            <div class="four-t-group">
+              <label class="field-label">4. Другие причины тромбоцитопении</label>
+              <select id="fourT4" class="text-input" onchange="calculate4T()">
+                <option value="2">Другие причины отсутствуют или маловероятны (2 балла)</option>
+                <option value="1">Другие причины возможны (сепсис, ХТ, операция) (1 балл)</option>
+                <option value="0" selected>Есть очевидная другая причина (тяжелый ДВС, сепсис) (0 баллов)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">Сумма баллов 4T</div>
+              <div class="metric-number" id="fourTScore">0 <span class="metric-unit">из 8</span></div>
+            </div>
+            <div id="fourTRisk" class="status-callout">0–3 балла: Низкая вероятность ГИТ (<5%). Гепарин можно продолжать.</div>
+          </div>
+        </div>
+
+        <!-- Khorana Score Calculator Card -->
+        <div class="panel-card" data-calc-group="risk" style="grid-column: 1 / -1;">
+          <div class="panel-header">
+            <span class="panel-label">RUSSCO / ASCO Тромбопрофилактика</span>
+            <h2 class="panel-title">Шкала Хорана (Khorana Score): Риск ВТЭО при ХТ</h2>
+          </div>
+
+          <div class="four-t-container">
+            <div class="field-item" style="grid-column: 1 / -1;">
+              <label class="field-label" for="khoranaCancer">1. Первичная локализация опухоли</label>
+              <select id="khoranaCancer" class="text-input" onchange="calculateKhorana()">
+                <option value="2">Очень высокий риск: Желудок, поджелудочная железа (2 балла)</option>
+                <option value="1">Высокий риск: Легкое, лимфома, мочевой пузырь, яички, гинекология (1 балл)</option>
+                <option value="0" selected>Другие локализации (0 баллов)</option>
+              </select>
+            </div>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="khoranaPlt" onchange="calculateKhorana()">
+              <span>Тромбоциты до ХТ ≥ 350 × 10⁹/л</span>
+              <span class="checkbox-points">+1 балл</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="khoranaWbc" onchange="calculateKhorana()">
+              <span>Лейкоциты до ХТ > 11 × 10⁹/л</span>
+              <span class="checkbox-points">+1 балл</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="khoranaHb" onchange="calculateKhorana()">
+              <span>Гемоглобин < 100 г/л или терапия эритропоэтинами</span>
+              <span class="checkbox-points">+1 балл</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="khoranaBmi" onchange="calculateKhorana()">
+              <span>ИМТ ≥ 35 кг/м² (ожирение II–III степени)</span>
+              <span class="checkbox-points">+1 балл</span>
+            </label>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">Баллы по шкале Хорана</div>
+              <div class="metric-number" id="khoranaScore">0 <span class="metric-unit">из 6</span></div>
+            </div>
+            <div id="khoranaRisk" class="status-callout">0 баллов: Низкий риск ВТЭО (1.5%). Медикаментозная тромбопрофилактика не показана.</div>
+          </div>
+        </div>
+
+        <!-- Revised Geneva Score Card -->
+        <div class="panel-card" data-calc-group="risk" style="grid-column: 1 / -1;">
+          <div class="panel-header">
+            <span class="panel-label">ESC / Ассоциация флебологов России</span>
+            <h2 class="panel-title">Шкала Geneva (Revised): Вероятность ТЭЛА</h2>
+          </div>
+
+          <div class="four-t-container">
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaAge" onchange="calculateGeneva()">
+              <span>Возраст старше 65 лет</span>
+              <span class="checkbox-points">+1</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaPriorVTE" onchange="calculateGeneva()">
+              <span>ТГВ или ТЭЛА в анамнезе</span>
+              <span class="checkbox-points">+3</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaSurgery" onchange="calculateGeneva()">
+              <span>Операция (наркоз) или перелом ноги за последний месяц</span>
+              <span class="checkbox-points">+2</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaMalignancy" onchange="calculateGeneva()">
+              <span>Активное злокачественное новообразование (или <1 года)</span>
+              <span class="checkbox-points">+2</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaLimbPain" onchange="calculateGeneva()">
+              <span>Односторонняя боль в нижней конечности</span>
+              <span class="checkbox-points">+3</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaHemoptysis" onchange="calculateGeneva()">
+              <span>Кровохарканье</span>
+              <span class="checkbox-points">+2</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="genevaDVTSign" onchange="calculateGeneva()">
+              <span>Боль при пальпации вен голени/бедра и односторонний отек</span>
+              <span class="checkbox-points">+4</span>
+            </label>
+
+            <div class="field-item">
+              <label class="field-label" for="genevaHR">Частота сердечных сокращений (ЧСС)</label>
+              <select id="genevaHR" class="text-input" onchange="calculateGeneva()">
+                <option value="0" selected>Менее 75 уд/мин (0 баллов)</option>
+                <option value="3">75–94 уд/мин (+3 балла)</option>
+                <option value="5">95 уд/мин и более (+5 баллов)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">Сумма баллов по Geneva</div>
+              <div class="metric-number" id="genevaScore">0 <span class="metric-unit">баллов</span></div>
+            </div>
+            <div id="genevaRisk" class="status-callout">0–3 балла: Низкая клиническая вероятность ТЭЛА (~8%). Рекомендовано исследование D-димера.</div>
+          </div>
+        </div>
+
+        <!-- IMPEDE VTE Calculator Card -->
+        <div class="panel-card" data-calc-group="risk" style="grid-column: 1 / -1;">
+          <div class="panel-header">
+            <span class="panel-label">Множественная миелома (NCCN / IMWG Guidelines)</span>
+            <h2 class="panel-title">Шкала IMPEDE VTE: Риск тромбозов при миеломе</h2>
+          </div>
+
+          <div class="four-t-container">
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeImid" onchange="calculateIMPEDE()">
+              <span><strong>I</strong>: Терапия IMiD (Леналидомид, Помалидомид, Талидомид)</span>
+              <span class="checkbox-points">+4</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeBmi" onchange="calculateIMPEDE()">
+              <span><strong>M</strong>: ИМТ ≥ 25 кг/м² (избыточный вес / ожирение)</span>
+              <span class="checkbox-points">+1</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeFracture" onchange="calculateIMPEDE()">
+              <span><strong>P</strong>: Перелом костей таза, бедра или вертлужной впадины</span>
+              <span class="checkbox-points">+4</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeEsa" onchange="calculateIMPEDE()">
+              <span><strong>E</strong>: Терапия стимуляторами эритропоэза (ЭПО)</span>
+              <span class="checkbox-points">+1</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeVTE" onchange="calculateIMPEDE()">
+              <span><strong>V</strong>: ТГВ или ТЭЛА в анамнезе до постановки диагноза</span>
+              <span class="checkbox-points">+5</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeCVC" onchange="calculateIMPEDE()">
+              <span><strong>T</strong>: Центральный катетер / порт-система / PICC</span>
+              <span class="checkbox-points">+2</span>
+            </label>
+
+            <label class="checkbox-item">
+              <input type="checkbox" id="impedeAsian" onchange="calculateIMPEDE()">
+              <span><strong>E</strong>: Азиатское происхождение</span>
+              <span class="checkbox-points" style="color:#059669; background:rgba(5,150,105,0.1);">-3</span>
+            </label>
+
+            <div class="field-item">
+              <label class="field-label" for="impedeSteroidDox"><strong>D</strong>: Дексаметазон или Доксорубицин</label>
+              <select id="impedeSteroidDox" class="text-input" onchange="calculateIMPEDE()">
+                <option value="0" selected>Нет данных препаратов (0 баллов)</option>
+                <option value="4">Дексаметазон высокие дозы (≥480 мг/мес) (+4)</option>
+                <option value="3">Доксорубицин / полихимиотерапия (+3)</option>
+                <option value="2">Дексаметазон низкие дозы (&lt;480 мг/мес) (+2)</option>
+              </select>
+            </div>
+
+            <div class="field-item" style="grid-column: 1 / -1;">
+              <label class="field-label" for="impedeProphylaxis"><strong>E</strong>: Текущая тромбопрофилактика / антикоагуляция</label>
+              <select id="impedeProphylaxis" class="text-input" onchange="calculateIMPEDE()">
+                <option value="0" selected>Без антикоагулянтной терапии (0 баллов)</option>
+                <option value="-3">Профилактический НМГ (напр. эноксапарин 40 мг) или Аспирин (-3)</option>
+                <option value="-4">Терапевтическая антикоагуляция (лечебный НМГ / ПОАК / Варфарин) (-4)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="metric-display-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; width: 100%; align-items: baseline;">
+              <div class="metric-caption">Сумма баллов IMPEDE VTE</div>
+              <div class="metric-number" id="impedeScore">0 <span class="metric-unit">баллов</span></div>
+            </div>
+            <div id="impedeRisk" class="status-callout">≤ 3 баллов: Низкий риск ВТЭО (&lt;5%). Рекомендован Аспирин (81–325 мг/сут) при терапии IMiD.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bookmarks View -->
+    <main class="content-viewport" id="bookmarksView" style="display: none;">
+      <div class="results-grid" id="bookmarksList">
+        <!-- Закладки -->
+      </div>
+    </main>
+
+    <!-- Bottom Navigation Dock -->
+    <nav class="dock-bar" role="navigation" aria-label="Основная навигация">
+      <div class="dock-inner">
+        <button class="dock-btn active" data-tab="search" aria-label="Раздел Источники" aria-selected="true" role="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          <span>Источники</span>
+        </button>
+
+        <button class="dock-btn" data-tab="calc" aria-label="Раздел Калькуляторы" aria-selected="false" role="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+          <span>Калькуляторы</span>
+        </button>
+
+        <button class="dock-btn" data-tab="bookmarks" aria-label="Раздел Избранное" aria-selected="false" role="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+          </svg>
+          <span>Избранное</span>
+        </button>
+      </div>
+    </nav>
+  </div>
+
+  <!-- Detail Modal View -->
+  <div class="modal-backdrop" id="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-handle-bar">
+        <div class="modal-drag-indicator"></div>
+      </div>
+      <div class="modal-top">
+        <div class="modal-header-meta">
+          <div class="meta-tag-row" id="modalMetaRow"></div>
+          <h2 class="modal-headline" id="modalTitle">Заголовок</h2>
+        </div>
+        <button class="btn-icon-close" id="modalCloseBtn" aria-label="Закрыть модальное окно">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-scrollable" id="modalBody">
+        <!-- Контент статьи -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Image Lightbox -->
+  <div class="lightbox-overlay" id="lightboxModal" role="dialog" aria-modal="true" aria-label="Просмотр иллюстрации">
+    <button class="lightbox-close-btn" id="lightboxCloseBtn" aria-label="Закрыть">
+      <svg viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div class="lightbox-content">
+      <img id="lightboxImg" class="lightbox-img" alt="Медицинская иллюстрация">
+      <div class="lightbox-zoom-controls" aria-label="Масштаб">
+        <button type="button" id="lightboxZoomOut" aria-label="Уменьшить">−</button>
+        <span id="lightboxZoomLabel">100%</span>
+        <button type="button" id="lightboxZoomIn" aria-label="Увеличить">+</button>
+        <button type="button" id="lightboxZoomReset" aria-label="Сбросить масштаб">Сбросить</button>
+      </div>
+      <div id="lightboxCaption" class="lightbox-caption"></div>
+      <div class="lightbox-zoom-hint">Раздвиньте пальцами или коснитесь дважды, чтобы приблизить</div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
