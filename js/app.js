@@ -456,7 +456,26 @@ function renderResults(results, showBack = false) {
 // Modal View Logic
 function openArticleModal(article, targetPage = null) {
   modalTitle.textContent = article.title;
-  
+
+  // DeVita: вместо постраничных изображений показываем фрагмент оригинального PDF.
+  let pdfHtml = '';
+  if (article.pdf) {
+    const pdf = article.pdf;
+    const localPage = targetPage
+      ? Math.max(1, Math.min(pdf.pages, targetPage - pdf.start + 1))
+      : 1;
+    const pdfSrc = `${pdf.file}#page=${localPage}`;
+    pdfHtml = `
+      <div class="pdf-viewer-wrap">
+        <div class="pdf-viewer-toolbar">
+          <span>Оригинальный PDF · стр. ${pdf.start}–${pdf.end}</span>
+          <a href="${pdfSrc}" target="_blank" rel="noopener">Открыть в новой вкладке</a>
+        </div>
+        <iframe class="pdf-viewer" src="${pdfSrc}" title="${article.title} — PDF"></iframe>
+      </div>
+    `;
+  }
+
   const typeLabel = getTypeLabel(article.type);
   const isBookmarked = bookmarks.includes(article.id);
 
@@ -480,6 +499,7 @@ function openArticleModal(article, targetPage = null) {
       </div>
     </div>
 
+    ${pdfHtml}
     <div>
       ${parseMarkdown(article.content_markdown)}
     </div>
@@ -549,10 +569,11 @@ modalBody.addEventListener('click', (e) => {
   const targetId = link.getAttribute('data-internal-id') || link.getAttribute('href');
   if (targetId && targetId.startsWith('#')) {
     e.preventDefault();
-    const cleanId = targetId.slice(1);
+    const [cleanId, query = ''] = targetId.slice(1).split('?');
+    const targetPage = parseInt(new URLSearchParams(query).get('p'), 10) || null;
     const targetArticle = catalogData.find(a => a.id === cleanId);
     if (targetArticle) {
-      openArticleModal(targetArticle);
+      openArticleModal(targetArticle, targetPage);
       const modalScroll = document.querySelector('.modal-scrollable');
       if (modalScroll) modalScroll.scrollTop = 0;
     }
@@ -791,18 +812,111 @@ const CALC_GROUPS = [
 ];
 
 let activeCalcGroup = 'all';
+let activeCalcId = null;
+let calcQuery = '';
 const calcGroupsEl = document.getElementById('calcGroups');
+const calcGridEl = document.getElementById('calcGrid');
+const calcSearchContainer = document.getElementById('calcSearchContainer');
+const calcSearchInput = document.getElementById('calcSearchInput');
+const clearCalcSearchBtn = document.getElementById('clearCalcSearchBtn');
 const calcCards = () => [...document.querySelectorAll('#calcView .panel-card[data-calc-group]')];
+
+function calcMeta(card, index) {
+  const groupId = card.getAttribute('data-calc-group');
+  const group = CALC_GROUPS.find(g => g.id === groupId);
+  return {
+    id: `calc-${index}`,
+    groupId,
+    group,
+    label: card.querySelector('.panel-label')?.textContent.trim() || '',
+    title: card.querySelector('.panel-title')?.textContent.trim() || 'Калькулятор',
+  };
+}
+
+function calcTile(meta, index, showGroup = false) {
+  return `
+    <button class="source-tile calc-tile" data-calc-target="${meta.id}" style="animation-delay: ${Math.min(index * 35, 200)}ms">
+      <span class="source-tile-icon">${meta.group?.icon || ''}</span>
+      <span class="source-tile-body">
+        <span class="source-tile-kind">${showGroup ? (meta.group?.title || '') : (meta.group?.kind || '')}</span>
+        <span class="source-tile-title">${meta.title}</span>
+        <span class="source-tile-count">${meta.label}</span>
+      </span>
+      <span class="source-tile-arrow" aria-hidden="true">→</span>
+    </button>`;
+}
+
+function bindCalcBack(handler, label = '← Назад') {
+  calcGroupsEl.innerHTML = `<button class="back-tile" id="backToCalcGroupsBtn">${label}</button>`;
+  document.getElementById('backToCalcGroupsBtn').addEventListener('click', () => {
+    handler();
+    renderCalcGroups();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
+function resetCalcQuery() {
+  calcQuery = '';
+  activeCalcGroup = 'all';
+  activeCalcId = null;
+  if (calcSearchInput) calcSearchInput.value = '';
+  if (clearCalcSearchBtn) clearCalcSearchBtn.style.display = 'none';
+}
+
+function selectCalc(id) {
+  calcQuery = '';
+  activeCalcGroup = 'all';
+  activeCalcId = id;
+  if (calcSearchInput) calcSearchInput.value = '';
+  if (clearCalcSearchBtn) clearCalcSearchBtn.style.display = 'none';
+}
 
 function renderCalcGroups() {
   const cards = calcCards();
   if (!calcGroupsEl) return;
 
-  if (activeCalcGroup === 'all') {
+  cards.forEach((card, index) => {
+    if (!card.dataset.calcId) card.dataset.calcId = `calc-${index}`;
+  });
+  const metas = cards.map((card, index) => calcMeta(card, index));
+  if (calcSearchContainer) {
+    calcSearchContainer.style.display = activeCalcId === null ? 'flex' : 'none';
+  }
+  if (clearCalcSearchBtn) clearCalcSearchBtn.style.display = calcQuery ? 'flex' : 'none';
+  calcGridEl?.classList.toggle('calc-single', activeCalcId !== null);
+
+  // Поиск по калькуляторам — плоский список совпадений из всех групп.
+  if (calcQuery) {
+    const found = metas.filter(m =>
+      `${m.title} ${m.label} ${m.group?.title || ''} ${m.group?.kind || ''}`
+        .toLowerCase().includes(calcQuery)
+    );
+    navTitle.textContent = 'Результаты поиска';
+    itemCount.textContent = `${found.length} ${pluralForm(found.length, ['инструмент', 'инструмента', 'инструментов'])}`;
+    if (!found.length) {
+      bindCalcBack(resetCalcQuery, '← Сбросить поиск');
+      calcGroupsEl.insertAdjacentHTML('beforeend', `<div class="calc-empty">Ничего не найдено. Попробуйте «BSA», «тромбоз» или «Cockcroft».</div>`);
+      return;
+    }
+    bindCalcBack(resetCalcQuery, '← Сбросить поиск');
+    calcGroupsEl.insertAdjacentHTML('beforeend', found.map((m, i) => calcTile(m, i, true)).join(''));
+    calcGroupsEl.querySelectorAll('[data-calc-target]').forEach(tile => {
+      tile.addEventListener('click', () => {
+        selectCalc(tile.getAttribute('data-calc-target'));
+        renderCalcGroups();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    });
+  } else if (activeCalcId !== null) {
+    const meta = metas.find(m => m.id === activeCalcId) || metas[0];
+    navTitle.textContent = meta.title;
+    itemCount.textContent = meta.group?.kind || 'Калькулятор';
+    bindCalcBack(() => { activeCalcId = null; }, `← К списку: ${meta.group?.title || 'калькуляторы'}`);
+  } else if (activeCalcGroup === 'all') {
     navTitle.textContent = 'Калькуляторы';
     itemCount.textContent = `${CALC_GROUPS.length} ${pluralForm(CALC_GROUPS.length, ['группа', 'группы', 'групп'])}`;
     calcGroupsEl.innerHTML = CALC_GROUPS.map((group, index) => {
-      const count = cards.filter(c => c.getAttribute('data-calc-group') === group.id).length;
+      const count = metas.filter(m => m.groupId === group.id).length;
       return `
         <button class="source-tile" data-calc-group-target="${group.id}" style="animation-delay: ${Math.min(index * 40, 200)}ms">
           <span class="source-tile-icon">${group.icon}</span>
@@ -818,23 +932,48 @@ function renderCalcGroups() {
       tile.addEventListener('click', () => {
         activeCalcGroup = tile.getAttribute('data-calc-group-target');
         renderCalcGroups();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
   } else {
     const group = CALC_GROUPS.find(g => g.id === activeCalcGroup);
-    const visible = cards.filter(c => c.getAttribute('data-calc-group') === activeCalcGroup);
-    itemCount.textContent = `${visible.length} ${pluralForm(visible.length, ['инструмент', 'инструмента', 'инструментов'])}`;
-    calcGroupsEl.innerHTML = `<button class="back-tile" id="backToCalcGroupsBtn">← Все калькуляторы</button>`;
-    document.getElementById('backToCalcGroupsBtn').addEventListener('click', () => {
-      activeCalcGroup = 'all';
-      renderCalcGroups();
+    const items = metas.filter(m => m.groupId === activeCalcGroup);
+    navTitle.textContent = group?.title || 'Калькуляторы';
+    itemCount.textContent = `${items.length} ${pluralForm(items.length, ['инструмент', 'инструмента', 'инструментов'])}`;
+    bindCalcBack(() => { activeCalcGroup = 'all'; }, '← Все группы');
+    calcGroupsEl.insertAdjacentHTML('beforeend', items.map((m, i) => calcTile(m, i)).join(''));
+    calcGroupsEl.querySelectorAll('[data-calc-target]').forEach(tile => {
+      tile.addEventListener('click', () => {
+        selectCalc(tile.getAttribute('data-calc-target'));
+        renderCalcGroups();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     });
-    if (group) navTitle.textContent = group.title;
   }
 
   cards.forEach(card => {
-    const visible = activeCalcGroup !== 'all' && card.getAttribute('data-calc-group') === activeCalcGroup;
-    card.style.display = visible ? '' : 'none';
+    card.style.display = card.dataset.calcId === activeCalcId ? '' : 'none';
+  });
+}
+
+if (calcSearchInput) {
+  calcSearchInput.addEventListener('input', (e) => {
+    calcQuery = e.target.value.trim().toLowerCase();
+    activeCalcGroup = 'all';
+    activeCalcId = null;
+    if (clearCalcSearchBtn) clearCalcSearchBtn.style.display = calcQuery ? 'flex' : 'none';
+    renderCalcGroups();
+  });
+}
+if (clearCalcSearchBtn) {
+  clearCalcSearchBtn.addEventListener('click', () => {
+    calcQuery = '';
+    activeCalcGroup = 'all';
+    activeCalcId = null;
+    if (calcSearchInput) calcSearchInput.value = '';
+    clearCalcSearchBtn.style.display = 'none';
+    renderCalcGroups();
+    calcSearchInput?.focus();
   });
 }
 
@@ -867,7 +1006,7 @@ dockButtons.forEach(btn => {
       segmentedControl.style.display = 'none';
       if (bookFilterScroll) bookFilterScroll.style.display = 'none';
       navTitle.textContent = 'Калькуляторы';
-      activeCalcGroup = 'all';
+      resetCalcQuery();
       renderCalcGroups();
       itemCount.style.display = 'block';
     } else if (currentTab === 'bookmarks') {
