@@ -12,29 +12,71 @@ import {
 } from './offline-books.js';
 
 const searchEngine = new HematologySearchEngine();
-let currentTab = 'search';
+let currentTab = 'home';
 let activeCategory = 'all';
 let activeBookFilter = 'all';
 let navLevel = 'sources'; // sources | books | articles
 let activeBookmarkSubtab = 'articles'; // articles | notes
+let calcReturnContext = null; // { calcId } при переходе из калькулятора в поиск
 let catalogData = [];
 let bookmarks = JSON.parse(localStorage.getItem('gem_bookmarks') || '[]');
 let offlineSummaryMap = new Map();
 let reader = null;
 
 // DOM Elements
+const homeView = document.getElementById('homeView');
+const appHeader = document.getElementById('appHeader');
+const dockBar = document.getElementById('dockBar');
+const brandHomeBtn = document.getElementById('brandHomeBtn');
+const homeDateEl = document.getElementById('homeDate');
+const homeWidgetsRow = document.getElementById('homeWidgetsRow');
+const homeEditWidgetsBtn = document.getElementById('homeEditWidgetsBtn');
+const homeWidgetSheet = document.getElementById('homeWidgetSheet');
+const homeWidgetSheetClose = document.getElementById('homeWidgetSheetClose');
+const homeWidgetSearch = document.getElementById('homeWidgetSearch');
+const homeWidgetPickerList = document.getElementById('homeWidgetPickerList');
 const searchInput = document.getElementById('searchInput');
 const clearSearchBtn = document.getElementById('clearSearchBtn');
-const segmentBtns = document.querySelectorAll('#segmentedControl .segment-btn');
 const bookFilterScroll = document.getElementById('bookFilterScroll');
 const articlesList = document.getElementById('articlesList');
 const itemCount = document.getElementById('itemCount');
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+const homeThemeToggleBtn = document.getElementById('homeThemeToggleBtn');
+const homeSearchBtn = document.getElementById('homeSearchBtn');
 const dockButtons = document.querySelectorAll('.dock-btn');
+
+// App Theme Switcher (Light / Dark)
+const ICON_MOON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>`;
+const ICON_SUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path stroke-linecap="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`;
+
+function applyAppTheme(theme) {
+  const isDark = theme === 'dark';
+  if (isDark) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.setAttribute('content', isDark ? '#0f1014' : '#f4f5f8');
+  [themeToggleBtn, homeThemeToggleBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.innerHTML = isDark ? ICON_SUN : ICON_MOON;
+    btn.setAttribute('aria-label', isDark ? 'Включить светлую тему' : 'Включить тёмную тему');
+  });
+}
+
+applyAppTheme(localStorage.getItem('gem_app_theme') || 'light');
+const toggleThemeHandler = () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('gem_app_theme', next);
+  applyAppTheme(next);
+};
+themeToggleBtn?.addEventListener('click', toggleThemeHandler);
+homeThemeToggleBtn?.addEventListener('click', toggleThemeHandler);
 const searchView = document.getElementById('searchView');
 const calcView = document.getElementById('calcView');
 const bookmarksView = document.getElementById('bookmarksView');
 const searchContainer = document.querySelector('.search-container');
-const segmentedControl = document.getElementById('segmentedControl');
 const navTitle = document.querySelector('.nav-title');
 const bookmarksList = document.getElementById('bookmarksList');
 
@@ -59,7 +101,8 @@ const BOOK_ORDER = [
   { id: 'emergency', short: 'Неотложные протоколы' },
   { id: 'tables-handbook', short: 'Справочник в таблицах' },
   { id: 'national-guide', short: 'Нац. руководство' },
-  { id: 'algorithms', short: 'Алгоритмы НМИЦ' },
+  { id: 'algorithms', short: 'Алгоритмы НМИЦ · Том 2' },
+  { id: 'algorithms-v1', short: 'Алгоритмы НМИЦ · Том 1' },
   { id: 'aster', short: 'Патофизиология Астер' },
   { id: 'basics', short: 'Основы гематологии' },
   { id: 'hematology-translation', short: 'Гематология (пер. с англ.)' },
@@ -124,8 +167,12 @@ function setNavLevel(level) {
 function performSearch() {
   const query = searchInput.value.trim();
 
+  if (bookFilterScroll) {
+    bookFilterScroll.style.display = (currentTab === 'search' && query.length > 0) ? 'flex' : 'none';
+  }
+
   // Три уровня навигации без поиска: разделы → учебники → главы
-  if (!query && activeCategory === 'all') {
+  if (!query) {
     if (navLevel === 'sources') {
       renderSectionTiles();
       return;
@@ -136,18 +183,31 @@ function performSearch() {
     }
   }
 
-  const results = searchEngine.search(query, activeCategory, activeBookFilter);
-  renderResults(results, activeBookFilter !== 'all' || navLevel !== 'sources');
+  const articleResults = searchEngine.search(query, 'all', activeBookFilter);
+  const calcResults = (query && activeBookFilter === 'all') ? searchCalculators(query) : [];
+  renderResults(articleResults, Boolean(calcReturnContext) || activeBookFilter !== 'all' || navLevel !== 'sources', calcResults);
+}
+
+function searchCalculators(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return calcCards().map((card, i) => calcMeta(card, i)).filter((m) => {
+    const hay = `${m.title} ${m.label} ${m.group?.title || ''} ${m.group?.names || ''} ${m.group?.kind || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
 }
 
 // Data Fetch & Engine Init
 async function init() {
+  initHomeScreen();
   try {
     const res = await fetch('./data/catalog.json');
     catalogData = await res.json();
     searchEngine.loadData(catalogData);
     renderBookFilters();
-    performSearch();
+    renderHomeWidgets();
+    navigateToTab('home');
+    if (homeView) homeView.classList.add('home-animate');
   } catch (err) {
     console.error('Data load error:', err);
     articlesList.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 48px;">
@@ -288,11 +348,12 @@ function pluralForm(n, forms) {
   return forms[2];
 }
 
+// Единое правило кнопки возврата: всегда на 1 уровень выше ("← В <родительский раздел>")
 function getBackState() {
-  if (navLevel === 'books') return { label: '← Учебники', target: 'books' };
-  if (activeBookFilter === 'emergency') return { label: '← Все разделы', target: 'sources' };
-  if (activeBookFilter && activeBookFilter !== 'all') return { label: '← Учебники', target: 'books' };
-  return { label: '← Все разделы', target: 'sources' };
+  if (calcReturnContext) return { label: '← В калькулятор', target: 'calc' };
+  if (activeBookFilter === 'emergency') return { label: '← В источники', target: 'sources' };
+  if (activeBookFilter && activeBookFilter !== 'all') return { label: '← В учебники', target: 'books' };
+  return { label: '← В источники', target: 'sources' };
 }
 
 function renderSectionTiles() {
@@ -433,7 +494,7 @@ async function renderBookTiles() {
   const books = [...groups.values()];
   itemCount.textContent = `${books.length} ${pluralForm(books.length, ['учебник', 'учебника', 'учебников'])}`;
 
-  articlesList.innerHTML = `<button class="back-tile" id="backToSectionsBtn">← Все разделы</button>` + books.map((book, index) => {
+  articlesList.innerHTML = `<button class="back-tile" id="backToSectionsBtn">← В источники</button>` + books.map((book, index) => {
     const cover = book.cover
       ? `<span class="source-tile-cover"><img src="${book.cover}" alt="Обложка учебника" loading="lazy"></span>`
       : `<span class="source-tile-icon">${SOURCE_ICON_BOOK}</span>`;
@@ -466,12 +527,12 @@ async function renderBookTiles() {
 }
 
 // Render Results Grid
-function renderResults(results, showBack = false) {
+function renderResults(results, showBack = false, calcResults = []) {
   const back = getBackState();
   const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency';
   const backTile = showBack
     ? `<div class="book-chapter-toolbar">
-        <button class="back-tile" id="backToSourcesBtn" style="flex:1;">${back.label}</button>
+        <button class="back-tile" id="backToSourcesBtn">${back.label}</button>
         ${showBookDl ? renderDownloadButtonHtml(activeBookFilter) : ''}
       </div>`
     : '';
@@ -480,7 +541,17 @@ function renderResults(results, showBack = false) {
     const backBtn = document.getElementById('backToSourcesBtn');
     if (backBtn) {
       backBtn.addEventListener('click', () => {
-        if (back.target === 'books') {
+        if (back.target === 'calc' && calcReturnContext) {
+          const returnCalcId = calcReturnContext.calcId;
+          calcReturnContext = null;
+          searchInput.value = '';
+          clearSearchBtn.style.display = 'none';
+          const calcDock = document.querySelector('.dock-btn[data-tab="calc"]');
+          if (calcDock) calcDock.click();
+          activeCalcId = returnCalcId;
+          renderCalcGroups();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (back.target === 'books') {
           setNavLevel('books');
         } else {
           setActiveBookFilter('all');
@@ -495,7 +566,8 @@ function renderResults(results, showBack = false) {
     });
   };
 
-  if (!results || results.length === 0) {
+  const totalCount = (results?.length || 0) + (calcResults?.length || 0);
+  if (totalCount === 0) {
     itemCount.textContent = '0 записей';
     articlesList.innerHTML = backTile + `
       <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
@@ -506,19 +578,31 @@ function renderResults(results, showBack = false) {
     return;
   }
 
-  itemCount.textContent = `${results.length} ${results.length === 1 ? 'запись' : results.length < 5 ? 'записи' : 'записей'}`;
+  itemCount.textContent = `${totalCount} ${pluralForm(totalCount, ['запись', 'записи', 'записей'])}`;
 
-  articlesList.innerHTML = backTile + results.map(({ item, page, snippet }, index) => {
-    const typeLabel = getTypeLabel(item.type);
+  const calcCardsHtml = (calcResults || []).map((m, index) => `
+    <article class="card-tile card-tile--calc" data-search-calc="${m.id}" style="animation-delay: ${Math.min(index * 25, 160)}ms">
+      <div>
+        <div class="card-meta-bar">
+          <span class="card-source-tag">Калькулятор · ${escapeHtml(m.group?.title || '')}</span>
+          <span class="card-page-meta">${escapeHtml(m.label)}</span>
+        </div>
+        <h2 class="card-title">${escapeHtml(m.title)}</h2>
+      </div>
+    </article>
+  `).join('');
+
+  articlesList.innerHTML = backTile + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
     const bookTitle = item.source.book_short || item.source.book;
     const pageLabel = page ? `стр. ${page}` : `стр. ${item.source.pages}`;
+    const hasIcd = Array.isArray(item.icd10) && item.icd10.length > 0;
 
     return `
       <article class="card-tile" data-id="${item.id}" data-page="${page || ''}" style="animation-delay: ${Math.min(index * 25, 200)}ms">
         <div>
           <div class="card-meta-bar">
-            <span class="card-source-tag">${bookTitle}${page ? ` · стр. ${page}` : ''}</span>
-            <span class="badge-outline">${typeLabel}</span>
+            <span class="card-source-tag">${bookTitle}</span>
+            <span class="card-page-meta">${pageLabel}</span>
           </div>
           
           <h2 class="card-title">${item.title}</h2>
@@ -532,23 +616,33 @@ function renderResults(results, showBack = false) {
           ` : ''}
         </div>
 
-        <div class="card-footer-tags">
-          ${item.icd10 ? item.icd10.slice(0, 3).map(c => `<span class="tag-pill">${c}</span>`).join('') : ''}
-          <span class="tag-pill">${pageLabel}</span>
-        </div>
+        ${hasIcd ? `
+          <div class="card-footer-tags">
+            ${item.icd10.slice(0, 3).map(c => `<span class="tag-pill">${c}</span>`).join('')}
+          </div>
+        ` : ''}
       </article>
     `;
   }).join('');
 
   bindBack();
 
-  // Click card to open modal (and jump to the found page)
-  articlesList.querySelectorAll('.card-tile').forEach(card => {
+  // Click card to open modal (and jump to the found page) or open calculator
+  articlesList.querySelectorAll('.card-tile[data-id]').forEach(card => {
     card.addEventListener('click', () => {
       const id = card.getAttribute('data-id');
       const page = parseInt(card.getAttribute('data-page'), 10) || null;
       const article = catalogData.find(a => a.id === id);
       if (article) openArticleModal(article, page);
+    });
+  });
+  articlesList.querySelectorAll('[data-search-calc]').forEach(card => {
+    card.addEventListener('click', () => {
+      const calcId = card.getAttribute('data-search-calc');
+      navigateToTab('calc');
+      selectCalc(calcId);
+      renderCalcGroups();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
 }
@@ -581,29 +675,17 @@ function openArticleModal(article, targetPage = null) {
 // Search input handling
 searchInput.addEventListener('input', (e) => {
   const query = e.target.value;
+  if (!query.trim()) calcReturnContext = null;
   clearSearchBtn.style.display = query ? 'flex' : 'none';
   performSearch();
 });
 
 clearSearchBtn.addEventListener('click', () => {
+  calcReturnContext = null;
   searchInput.value = '';
   clearSearchBtn.style.display = 'none';
   performSearch();
   searchInput.focus();
-});
-
-// Segmented Navigation
-segmentBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    segmentBtns.forEach(b => {
-      b.classList.remove('active');
-      b.setAttribute('aria-selected', 'false');
-    });
-    btn.classList.add('active');
-    btn.setAttribute('aria-selected', 'true');
-    activeCategory = btn.getAttribute('data-type');
-    performSearch();
-  });
 });
 
 // Калькуляторы: плитки групп по аналогии с навигацией по источникам
@@ -677,9 +759,62 @@ function selectCalc(id) {
   if (clearCalcSearchBtn) clearCalcSearchBtn.style.display = 'none';
 }
 
+function getCalcSourceQuery(card) {
+  if (card.querySelector('#bsaHeight')) return 'доза';
+  if (card.querySelector('#ancWBC')) {
+    const val = parseFloat(document.getElementById('ancResult')?.dataset.numValue);
+    return (!Number.isNaN(val) && val < 0.5) ? 'фебрильная нейтропения' : 'нейтропения';
+  }
+  if (card.querySelector('#crclAge')) {
+    const val = parseFloat(document.getElementById('crclResult')?.dataset.numValue);
+    return (!Number.isNaN(val) && val < 60) ? 'леналидомид' : 'креатинин';
+  }
+  if (card.querySelector('#fourT1')) {
+    const val = parseFloat(document.getElementById('fourTScore')?.dataset.numValue);
+    return (!Number.isNaN(val) && val >= 4) ? 'гепарин' : 'тромбоцитопения';
+  }
+  if (card.querySelector('#bmiHeight')) return 'индекс массы тела';
+  if (card.querySelector('#khoranaCancer')) return 'тромбоз';
+  if (card.querySelector('#genevaHR')) return 'ТЭЛА';
+  if (card.querySelector('#impedeImid')) return 'множественная миелома';
+  return card.querySelector('.panel-title')?.textContent.trim() || '';
+}
+
+function navigateToSourcesSearch(query, calcId) {
+  const searchDock = document.querySelector('.dock-btn[data-tab="search"]');
+  if (searchDock) searchDock.click();
+  calcReturnContext = calcId ? { calcId } : null;
+  activeBookFilter = 'all';
+  navLevel = 'sources';
+  updateBookChipStates();
+  searchInput.value = query;
+  clearSearchBtn.style.display = query ? 'flex' : 'none';
+  performSearch();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function ensureCalcSourceButtons() {
+  calcCards().forEach((card) => {
+    if (card.querySelector('.calc-source-btn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'calc-source-btn';
+    btn.innerHTML = `
+      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+      <span>Найти в источниках</span>
+      <span aria-hidden="true">→</span>
+    `;
+    btn.addEventListener('click', () => {
+      navigateToSourcesSearch(getCalcSourceQuery(card), card.dataset.calcId || activeCalcId);
+    });
+    card.appendChild(btn);
+  });
+}
+
 function renderCalcGroups() {
   const cards = calcCards();
   if (!calcGroupsEl) return;
+  ensureCalcSourceButtons();
 
   cards.forEach((card, index) => {
     if (!card.dataset.calcId) card.dataset.calcId = `calc-${index}`;
@@ -700,11 +835,11 @@ function renderCalcGroups() {
     navTitle.textContent = 'Результаты поиска';
     itemCount.textContent = `${found.length} ${pluralForm(found.length, ['инструмент', 'инструмента', 'инструментов'])}`;
     if (!found.length) {
-      bindCalcBack(resetCalcQuery, '← Сбросить поиск');
+      bindCalcBack(resetCalcQuery, '← В калькуляторы');
       calcGroupsEl.insertAdjacentHTML('beforeend', `<div class="calc-empty">Ничего не найдено. Попробуйте «BSA», «тромбоз» или «Cockcroft».</div>`);
       return;
     }
-    bindCalcBack(resetCalcQuery, '← Сбросить поиск');
+    bindCalcBack(resetCalcQuery, '← В калькуляторы');
     calcGroupsEl.insertAdjacentHTML('beforeend', found.map((m, i) => calcTile(m, i, true)).join(''));
     calcGroupsEl.querySelectorAll('[data-calc-target]').forEach(tile => {
       tile.addEventListener('click', () => {
@@ -716,8 +851,12 @@ function renderCalcGroups() {
   } else if (activeCalcId !== null) {
     const meta = metas.find(m => m.id === activeCalcId) || metas[0];
     navTitle.textContent = meta.title;
-    itemCount.textContent = meta.group?.kind || 'Калькулятор';
-    bindCalcBack(() => { activeCalcId = null; }, `← К списку: ${meta.group?.title || 'калькуляторы'}`);
+    itemCount.textContent = 'Калькулятор';
+    const parentTitle = meta.group?.title || 'Калькуляторы';
+    bindCalcBack(() => {
+      activeCalcId = null;
+      if (meta.groupId) activeCalcGroup = meta.groupId;
+    }, `← В ${parentTitle}`);
   } else if (activeCalcGroup === 'all') {
     navTitle.textContent = 'Калькуляторы';
     itemCount.textContent = `${CALC_GROUPS.length} ${pluralForm(CALC_GROUPS.length, ['группа', 'группы', 'групп'])}`;
@@ -746,7 +885,7 @@ function renderCalcGroups() {
     const items = metas.filter(m => m.groupId === activeCalcGroup);
     navTitle.textContent = group?.title || 'Калькуляторы';
     itemCount.textContent = `${items.length} ${pluralForm(items.length, ['инструмент', 'инструмента', 'инструментов'])}`;
-    bindCalcBack(() => { activeCalcGroup = 'all'; }, '← Все группы');
+    bindCalcBack(() => { activeCalcGroup = 'all'; }, '← В калькуляторы');
     calcGroupsEl.insertAdjacentHTML('beforeend', items.map((m, i) => calcTile(m, i)).join(''));
     calcGroupsEl.querySelectorAll('[data-calc-target]').forEach(tile => {
       tile.addEventListener('click', () => {
@@ -757,6 +896,9 @@ function renderCalcGroups() {
     });
   }
 
+  if (calcGridEl) {
+    calcGridEl.classList.toggle('calc-single', activeCalcId !== null);
+  }
   cards.forEach(card => {
     card.style.display = card.dataset.calcId === activeCalcId ? '' : 'none';
   });
@@ -783,50 +925,237 @@ if (clearCalcSearchBtn) {
   });
 }
 
-// Bottom Dock Navigation with Dynamic Header Adaptation
+// ==========================================================================
+// Главный экран (Home View), 3 настраиваемых виджета и переключение разделов
+// ==========================================================================
+const DEFAULT_HOME_WIDGETS = [
+  { kind: 'calc', id: 'calc-0', label: 'BSA (доза)', sub: 'Калькулятор' },
+  { kind: 'book', id: 'algorithms', label: 'Алгоритмы', sub: 'Учебник' },
+  { kind: 'article', id: 'emergency-tls', label: 'СЛО', sub: 'Протокол' },
+];
+let homeWidgetsEditing = false;
+let editingWidgetSlot = 0;
+
+function getHomeWidgets() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('gem_home_widgets') || 'null');
+    if (Array.isArray(raw) && raw.length === 3) return raw;
+  } catch (_) { /* ignore */ }
+  return [...DEFAULT_HOME_WIDGETS];
+}
+
+function saveHomeWidgets(list) {
+  localStorage.setItem('gem_home_widgets', JSON.stringify(list));
+}
+
+function renderHomeWidgets() {
+  if (!homeWidgetsRow) return;
+  const list = getHomeWidgets();
+  homeWidgetsRow.innerHTML = list.map((w, idx) => {
+    const kind = w?.sub || 'Быстро';
+    const title = w?.label || '+ Добавить';
+    return `
+      <button type="button" class="home-widget-btn ${homeWidgetsEditing ? 'is-editing' : ''}" data-widget-slot="${idx}">
+        <span class="home-widget-kind">${escapeHtml(kind)}</span>
+        <span class="home-widget-title">${escapeHtml(title)}</span>
+        ${homeWidgetsEditing ? '<span class="home-widget-edit-badge" aria-hidden="true">✎</span>' : ''}
+      </button>
+    `;
+  }).join('');
+
+  homeWidgetsRow.querySelectorAll('[data-widget-slot]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const slot = Number(btn.getAttribute('data-widget-slot'));
+      if (homeWidgetsEditing) {
+        openHomeWidgetPicker(slot);
+        return;
+      }
+      const w = getHomeWidgets()[slot];
+      if (!w) {
+        openHomeWidgetPicker(slot);
+        return;
+      }
+      if (w.kind === 'calc') {
+        navigateToTab('calc');
+        activeCalcId = w.id;
+        renderCalcGroups();
+      } else if (w.kind === 'book') {
+        navigateToTab('search');
+        setActiveBookFilter(w.id);
+      } else if (w.kind === 'article') {
+        const art = catalogData.find((a) => a.id === w.id);
+        navigateToTab('search');
+        if (art) openArticleModal(art);
+      }
+    });
+  });
+}
+
+function openHomeWidgetPicker(slot) {
+  if (!homeWidgetSheet || !homeWidgetPickerList) return;
+  editingWidgetSlot = slot;
+  if (homeWidgetSearch) homeWidgetSearch.value = '';
+  renderWidgetPickerOptions('');
+  homeWidgetSheet.classList.add('open');
+}
+
+function renderWidgetPickerOptions(filterText) {
+  if (!homeWidgetPickerList) return;
+  const q = filterText.trim().toLowerCase();
+  const options = [];
+
+  // 1. Калькуляторы
+  calcCards().forEach((card, idx) => {
+    const title = card.querySelector('.panel-title')?.textContent.trim() || `Калькулятор ${idx + 1}`;
+    const short = title.split('(')[0].trim();
+    options.push({ kind: 'calc', id: `calc-${idx}`, label: short, sub: 'Калькулятор', full: title });
+  });
+
+  // 2. Учебники
+  const seenBooks = new Set();
+  catalogData.forEach((a) => {
+    const bid = a.source?.book_id;
+    if (bid && bid !== 'emergency' && !seenBooks.has(bid)) {
+      seenBooks.add(bid);
+      const short = a.source?.book_short || a.source?.book || bid;
+      options.push({ kind: 'book', id: bid, label: short, sub: 'Учебник', full: short });
+    }
+  });
+
+  // 3. Статьи / протоколы
+  catalogData.forEach((a) => {
+    const sub = a.source?.book_short || 'Статья';
+    options.push({ kind: 'article', id: a.id, label: a.title, sub, full: `${a.title} ${sub}` });
+  });
+
+  const filtered = q
+    ? options.filter((o) => o.full.toLowerCase().includes(q) || o.sub.toLowerCase().includes(q))
+    : options.slice(0, 30);
+
+  homeWidgetPickerList.innerHTML = filtered.map((o, i) => `
+    <button type="button" class="reader-toc-item" data-pick-idx="${i}">
+      <span>${escapeHtml(o.label)}</span>
+      <small>${escapeHtml(o.sub)}</small>
+    </button>
+  `).join('');
+
+  homeWidgetPickerList.querySelectorAll('[data-pick-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const chosen = filtered[Number(btn.getAttribute('data-pick-idx'))];
+      if (!chosen) return;
+      const list = getHomeWidgets();
+      list[editingWidgetSlot] = { kind: chosen.kind, id: chosen.id, label: chosen.label, sub: chosen.sub };
+      saveHomeWidgets(list);
+      homeWidgetsEditing = false;
+      homeEditWidgetsBtn?.classList.remove('active');
+      if (homeEditWidgetsBtn) homeEditWidgetsBtn.textContent = 'Настроить';
+      homeWidgetSheet.classList.remove('open');
+      renderHomeWidgets();
+    });
+  });
+}
+
+function initHomeScreen() {
+  if (homeDateEl) {
+    const formatted = new Intl.DateTimeFormat('ru-RU', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(new Date());
+    homeDateEl.textContent = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  }
+
+  document.querySelectorAll('[data-home-nav]').forEach((tile) => {
+    tile.addEventListener('click', () => {
+      navigateToTab(tile.getAttribute('data-home-nav'));
+    });
+  });
+
+  brandHomeBtn?.addEventListener('click', () => navigateToTab('home'));
+  brandHomeBtn?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      navigateToTab('home');
+    }
+  });
+
+  homeEditWidgetsBtn?.addEventListener('click', () => {
+    homeWidgetsEditing = !homeWidgetsEditing;
+    homeEditWidgetsBtn.classList.toggle('active', homeWidgetsEditing);
+    homeEditWidgetsBtn.textContent = homeWidgetsEditing ? 'Готово' : 'Настроить';
+    renderHomeWidgets();
+  });
+
+  homeSearchBtn?.addEventListener('click', () => {
+    navigateToTab('search');
+    requestAnimationFrame(() => searchInput?.focus());
+  });
+
+  homeWidgetSheetClose?.addEventListener('click', () => homeWidgetSheet?.classList.remove('open'));
+  homeWidgetSearch?.addEventListener('input', (e) => renderWidgetPickerOptions(e.target.value));
+}
+
+function navigateToTab(tab) {
+  currentTab = tab;
+  const isHome = tab === 'home';
+
+  if (homeView) homeView.style.display = isHome ? 'flex' : 'none';
+  if (appHeader) appHeader.style.display = isHome ? 'none' : 'block';
+  if (dockBar) dockBar.style.display = isHome ? 'none' : 'block';
+  document.body.classList.toggle('on-home', isHome);
+
+  if (isHome) {
+    searchView.style.display = 'none';
+    calcView.style.display = 'none';
+    bookmarksView.style.display = 'none';
+    renderHomeWidgets();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
+  homeView?.classList.remove('home-animate');
+
+  dockButtons.forEach((b) => {
+    const active = b.getAttribute('data-tab') === tab;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+
+  if (tab === 'search') {
+    searchView.style.display = 'block';
+    calcView.style.display = 'none';
+    bookmarksView.style.display = 'none';
+    searchContainer.style.display = 'flex';
+    navTitle.textContent = 'Источники';
+    itemCount.style.display = 'block';
+    performSearch();
+  } else if (tab === 'calc') {
+    searchView.style.display = 'none';
+    calcView.style.display = 'block';
+    bookmarksView.style.display = 'none';
+    searchContainer.style.display = 'none';
+    if (bookFilterScroll) bookFilterScroll.style.display = 'none';
+    navTitle.textContent = 'Калькуляторы';
+    resetCalcQuery();
+    renderCalcGroups();
+    itemCount.style.display = 'block';
+  } else if (tab === 'bookmarks') {
+    searchView.style.display = 'none';
+    calcView.style.display = 'none';
+    bookmarksView.style.display = 'block';
+    searchContainer.style.display = 'none';
+    if (bookFilterScroll) bookFilterScroll.style.display = 'none';
+    navTitle.textContent = 'Избранное';
+    itemCount.textContent = `${bookmarks.length} ${bookmarks.length === 1 ? 'статья' : 'статей'}`;
+    itemCount.style.display = 'block';
+    renderBookmarks();
+  }
+}
+
+// Bottom Dock Navigation
 dockButtons.forEach(btn => {
   btn.addEventListener('click', () => {
-    dockButtons.forEach(b => {
-      b.classList.remove('active');
-      b.setAttribute('aria-selected', 'false');
-    });
-    btn.classList.add('active');
-    btn.setAttribute('aria-selected', 'true');
-    currentTab = btn.getAttribute('data-tab');
-
-    if (currentTab === 'search') {
-      searchView.style.display = 'block';
-      calcView.style.display = 'none';
-      bookmarksView.style.display = 'none';
-      searchContainer.style.display = 'flex';
-      segmentedControl.style.display = 'flex';
-      if (bookFilterScroll) bookFilterScroll.style.display = 'flex';
-      navTitle.textContent = 'Источники';
-      itemCount.style.display = 'block';
-      performSearch();
-    } else if (currentTab === 'calc') {
-      searchView.style.display = 'none';
-      calcView.style.display = 'block';
-      bookmarksView.style.display = 'none';
-      searchContainer.style.display = 'none';
-      segmentedControl.style.display = 'none';
-      if (bookFilterScroll) bookFilterScroll.style.display = 'none';
-      navTitle.textContent = 'Калькуляторы';
-      resetCalcQuery();
-      renderCalcGroups();
-      itemCount.style.display = 'block';
-    } else if (currentTab === 'bookmarks') {
-      searchView.style.display = 'none';
-      calcView.style.display = 'none';
-      bookmarksView.style.display = 'block';
-      searchContainer.style.display = 'none';
-      segmentedControl.style.display = 'none';
-      if (bookFilterScroll) bookFilterScroll.style.display = 'none';
-      navTitle.textContent = 'Избранное';
-      itemCount.textContent = `${bookmarks.length} ${bookmarks.length === 1 ? 'статья' : 'статей'}`;
-      itemCount.style.display = 'block';
-      renderBookmarks();
-    }
+    navigateToTab(btn.getAttribute('data-tab'));
   });
 });
 
@@ -929,6 +1258,45 @@ async function renderBookmarks() {
   });
 }
 
+// Плавная анимация финального значения калькуляторов (быстрый набор цифр)
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+function animateMetricValue(elId, target, decimals = 0, unit = '') {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const endVal = Number(target) || 0;
+  const startVal = el.dataset.numValue !== undefined ? parseFloat(el.dataset.numValue) : 0;
+  el.dataset.numValue = String(endVal);
+  const unitHtml = unit ? ` <span class="metric-unit">${unit}</span>` : '';
+
+  if (el._animFrame) cancelAnimationFrame(el._animFrame);
+
+  if (REDUCED_MOTION || Math.abs(endVal - startVal) < 0.0001) {
+    el.innerHTML = `${endVal.toFixed(decimals)}${unitHtml}`;
+    return;
+  }
+
+  const duration = 280;
+  const t0 = performance.now();
+  el.classList.remove('metric-pop');
+
+  const step = (now) => {
+    const p = Math.min(1, (now - t0) / duration);
+    const eased = p === 1 ? 1 : 1 - Math.pow(2, -10 * p);
+    const current = startVal + (endVal - startVal) * eased;
+    el.innerHTML = `${current.toFixed(decimals)}${unitHtml}`;
+    if (p < 1) {
+      el._animFrame = requestAnimationFrame(step);
+    } else {
+      el.innerHTML = `${endVal.toFixed(decimals)}${unitHtml}`;
+      el._animFrame = null;
+      el.classList.add('metric-pop');
+      setTimeout(() => el.classList.remove('metric-pop'), 220);
+    }
+  };
+  el._animFrame = requestAnimationFrame(step);
+}
+
 // Calculators
 window.calculateBSA = function() {
   const h = parseFloat(document.getElementById('bsaHeight').value);
@@ -937,12 +1305,16 @@ window.calculateBSA = function() {
   
   if (h > 0 && w > 0) {
     const bsa = Math.sqrt((h * w) / 3600);
-    document.getElementById('bsaResult').innerHTML = `${bsa.toFixed(2)} <span class="metric-unit">м²</span>`;
+    animateMetricValue('bsaResult', bsa, 2, 'м²');
     
     if (dose > 0) {
-      document.getElementById('bsaTotalDose').innerHTML = `${Math.round(bsa * dose)} <span class="metric-unit">мг</span>`;
+      animateMetricValue('bsaTotalDose', Math.round(bsa * dose), 0, 'мг');
     } else {
-      document.getElementById('bsaTotalDose').textContent = '—';
+      const doseEl = document.getElementById('bsaTotalDose');
+      if (doseEl) {
+        doseEl.dataset.numValue = '0';
+        doseEl.textContent = '—';
+      }
     }
   }
 };
@@ -954,17 +1326,17 @@ window.calculateANC = function() {
 
   if (wbc >= 0) {
     const anc = wbc * (segs + bands) / 100;
-    document.getElementById('ancResult').innerHTML = `${anc.toFixed(2)} <span class="metric-unit">×10⁹/л</span>`;
+    animateMetricValue('ancResult', anc, 2, '×10⁹/л');
 
     const risk = document.getElementById('ancRisk');
     if (anc < 0.5) {
-      risk.innerHTML = '<span style="color:#ffffff; font-weight:600;">Агранулоцитоз (CTCAE 4) — критический риск инфекций</span>';
+      risk.innerHTML = '<span style="color:#e11d48; font-weight:600;">Агранулоцитоз (CTCAE 4) — критический риск инфекций</span>';
     } else if (anc < 1.0) {
-      risk.innerHTML = 'Нейтропения 3 степени';
+      risk.innerHTML = '<span style="color:#d97706; font-weight:600;">Нейтропения 3 степени</span>';
     } else if (anc < 1.5) {
-      risk.innerHTML = 'Нейтропения 2 степени';
+      risk.innerHTML = '<span style="color:#d97706; font-weight:600;">Нейтропения 2 степени</span>';
     } else {
-      risk.innerHTML = 'Показатели в пределах нормы';
+      risk.innerHTML = '<span style="color:#059669; font-weight:600;">Показатели в пределах нормы</span>';
     }
   }
 };
@@ -995,17 +1367,17 @@ window.calculateCrCl = function() {
     const k = crclGender === 'male' ? 1.23 : 1.05;
     const crcl = ((140 - age) * weight * k) / creat;
 
-    document.getElementById('crclResult').innerHTML = `${crcl.toFixed(1)} <span class="metric-unit">мл/мин</span>`;
+    animateMetricValue('crclResult', crcl, 1, 'мл/мин');
 
     const advice = document.getElementById('crclAdvice');
     if (crcl >= 60) {
-      advice.innerHTML = '<span style="color:#ffffff; font-weight:500;">Нормальная функция или легкое снижение (ХБП 1–2).</span> Стандартные дозы цитостатиков.';
+      advice.innerHTML = '<span style="color:#059669; font-weight:600;">Нормальная функция или лёгкое снижение (ХБП 1–2).</span> Стандартные дозы цитостатиков.';
     } else if (crcl >= 30) {
-      advice.innerHTML = '<span style="color:#fbbf24; font-weight:500;">Умеренное снижение (ХБП 3 ст.).</span> Леналидомид: редукция до 10 мг/сут. Контроль бисфосфонатов.';
+      advice.innerHTML = '<span style="color:#d97706; font-weight:600;">Умеренное снижение (ХБП 3 ст.).</span> Леналидомид: редукция до 10 мг/сут. Контроль бисфосфонатов.';
     } else if (crcl >= 15) {
-      advice.innerHTML = '<span style="color:#fb7185; font-weight:500;">Тяжелое снижение (ХБП 4 ст.).</span> Леналидомид: 15 мг через день или 5 мг/сут. НМГ строго по анти-Ха.';
+      advice.innerHTML = '<span style="color:#e11d48; font-weight:600;">Тяжёлое снижение (ХБП 4 ст.).</span> Леналидомид: 15 мг через день или 5 мг/сут. НМГ строго по анти-Ха.';
     } else {
-      advice.innerHTML = '<span style="color:#ffffff; font-weight:600; background:rgba(225,29,72,0.2); padding:2px 6px; border-radius:4px;">Терминальная ХБП / Диализ.</span> Требуется строгая редукция цитостатиков. Леналидомид 5 мг после диализа.';
+      advice.innerHTML = '<span style="color:#e11d48; font-weight:700;">Терминальная ХБП / Диализ.</span> Требуется строгая редукция цитостатиков. Леналидомид 5 мг после диализа.';
     }
   }
 };
@@ -1017,7 +1389,7 @@ window.calculate4T = function() {
   const t4 = parseInt(document.getElementById('fourT4').value, 10) || 0;
 
   const total = t1 + t2 + t3 + t4;
-  document.getElementById('fourTScore').innerHTML = `${total} <span class="metric-unit">из 8</span>`;
+  animateMetricValue('fourTScore', total, 0, 'из 8');
 
   const riskElem = document.getElementById('fourTRisk');
   if (total <= 3) {
@@ -1037,7 +1409,7 @@ window.calculateBMI = function() {
   if (h > 0 && w > 0) {
     const heightM = h / 100;
     const bmi = w / (heightM * heightM);
-    document.getElementById('bmiResult').innerHTML = `${bmi.toFixed(1)} <span class="metric-unit">кг/м²</span>`;
+    animateMetricValue('bmiResult', bmi, 1, 'кг/м²');
 
     const statusElem = document.getElementById('bmiStatus');
     if (bmi <= 16.0) {
@@ -1056,7 +1428,7 @@ window.calculateBMI = function() {
       statusElem.innerHTML = '<span style="color:#991b1b; font-weight:700;">Ожирение III степени</span> (≥ 40.0 кг/м²)';
     }
   } else {
-    document.getElementById('bmiResult').innerHTML = `0.0 <span class="metric-unit">кг/м²</span>`;
+    animateMetricValue('bmiResult', 0, 1, 'кг/м²');
     document.getElementById('bmiStatus').textContent = 'Введите рост и вес для расчета';
   }
 };
@@ -1070,7 +1442,7 @@ window.calculateKhorana = function() {
   const bmi = document.getElementById('khoranaBmi').checked ? 1 : 0;
 
   const total = cancer + plt + wbc + hb + bmi;
-  document.getElementById('khoranaScore').innerHTML = `${total} <span class="metric-unit">из 6</span>`;
+  animateMetricValue('khoranaScore', total, 0, 'из 6');
 
   const riskElem = document.getElementById('khoranaRisk');
   if (total === 0) {
@@ -1094,7 +1466,7 @@ window.calculateGeneva = function() {
   const dVTsign = document.getElementById('genevaDVTSign').checked ? 4 : 0;
 
   const total = age + priorVTE + surgery + malignancy + limbPain + hemoptysis + hr + dVTsign;
-  document.getElementById('genevaScore').innerHTML = `${total} <span class="metric-unit">баллов</span>`;
+  animateMetricValue('genevaScore', total, 0, 'баллов');
 
   const riskElem = document.getElementById('genevaRisk');
   if (total <= 3) {
@@ -1119,7 +1491,7 @@ window.calculateIMPEDE = function() {
   const proph = parseInt(document.getElementById('impedeProphylaxis').value, 10) || 0;
 
   const total = imid + bmi + fracture + esa + steroidDox + asian + vte + cvc + proph;
-  document.getElementById('impedeScore').innerHTML = `${total} <span class="metric-unit">баллов</span>`;
+  animateMetricValue('impedeScore', total, 0, 'баллов');
 
   const riskElem = document.getElementById('impedeRisk');
   if (total <= 3) {

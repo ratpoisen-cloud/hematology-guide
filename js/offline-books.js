@@ -12,11 +12,43 @@ import {
 
 export const BOOK_CACHE_PREFIX = 'gem-book-';
 
+// Версия набора файлов книги. При смене формата/фрагментов старый офлайн-кэш
+// считается устаревшим: record без assetsVersion трактуется как версия 1.
+const BOOK_ASSET_VERSIONS = {
+  'algorithms': 2,  // том 2: WebP → PDF-фрагменты
+};
+
+export function getBookAssetVersion(bookId) {
+  return BOOK_ASSET_VERSIONS[bookId] || 1;
+}
+
+function bookCacheName(bookId, version = getBookAssetVersion(bookId)) {
+  return `${BOOK_CACHE_PREFIX}${bookId}${version > 1 ? `-v${version}` : ''}`;
+}
+
+async function purgeStaleBookCache(bookId, record) {
+  const expected = getBookAssetVersion(bookId);
+  const actual = Number(record?.assetsVersion) || 1;
+  if (!record || actual === expected) return false;
+  if ('caches' in window) {
+    // Удаляем и старую, и целевую версию: прерванная загрузка или гонки не
+    // должны оставлять сиротой кэш с неактуальными файлами.
+    const names = new Set([
+      bookCacheName(bookId, actual),
+      bookCacheName(bookId, expected),
+    ]);
+    await Promise.all([...names].map((name) => caches.delete(name)));
+  }
+  await deleteOfflineBookRecord(bookId);
+  return true;
+}
+
 // Примерный размер в МБ (для подсказки до загрузки)
 const ESTIMATED_BOOK_MB = {
   'tables-handbook': 16,
   'aster': 41,
-  'algorithms': 66,
+  'algorithms': 7,
+  'algorithms-v1': 8,
   'devita': 120,
   'national-guide': 90,
   'basics': 35,
@@ -89,6 +121,7 @@ export async function getBookOfflineSummary(bookId) {
   }
   const record = await getOfflineBook(bookId);
   if (record && record.status === 'ready') {
+    if (await purgeStaleBookCache(bookId, record)) return { status: 'none', bookId };
     return record;
   }
   return { status: 'none', bookId };
@@ -97,9 +130,11 @@ export async function getBookOfflineSummary(bookId) {
 export async function getAllOfflineSummaryMap() {
   const list = await getAllOfflineBooks();
   const map = new Map();
-  list.forEach((rec) => {
-    if (rec?.bookId) map.set(rec.bookId, rec);
-  });
+  for (const rec of list) {
+    if (!rec?.bookId) continue;
+    if (await purgeStaleBookCache(rec.bookId, rec)) continue;
+    map.set(rec.bookId, rec);
+  }
   activeDownloads.forEach((entry, bookId) => {
     map.set(bookId, { status: 'downloading', bookId, ...entry.progress });
   });
@@ -121,6 +156,9 @@ export async function downloadBook(bookId, catalogData) {
     throw new Error('Cache API не поддерживается в этом браузере');
   }
 
+  const oldRecord = await getOfflineBook(bookId);
+  if (oldRecord) await purgeStaleBookCache(bookId, oldRecord);
+
   const assets = collectBookAssets(bookId, catalogData);
   if (assets.length === 0) {
     throw new Error('Нет файлов для скачивания');
@@ -138,7 +176,7 @@ export async function downloadBook(bookId, catalogData) {
   activeDownloads.set(bookId, { controller, progress });
   notify(bookId, { status: 'downloading', bookId, ...progress });
 
-  const cacheName = `${BOOK_CACHE_PREFIX}${bookId}`;
+  const cacheName = bookCacheName(bookId);
   const cache = await caches.open(cacheName);
   const CONCURRENCY = 4;
   let index = 0;
@@ -191,6 +229,7 @@ export async function downloadBook(bookId, catalogData) {
     const record = {
       bookId,
       status: 'ready',
+      assetsVersion: getBookAssetVersion(bookId),
       downloadedAt: Date.now(),
       totalFiles: assets.length,
       bytes: progress.bytes,
@@ -209,7 +248,11 @@ export async function downloadBook(bookId, catalogData) {
 export async function removeBookCache(bookId) {
   cancelBookDownload(bookId);
   if ('caches' in window) {
-    await caches.delete(`${BOOK_CACHE_PREFIX}${bookId}`);
+    const names = new Set([
+      bookCacheName(bookId, 1),
+      bookCacheName(bookId, getBookAssetVersion(bookId)),
+    ]);
+    await Promise.all([...names].map((name) => caches.delete(name)));
   }
   await deleteOfflineBookRecord(bookId);
   notify(bookId, { status: 'none', bookId });
