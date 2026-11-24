@@ -1,25 +1,34 @@
 import { HematologySearchEngine } from './search-engine.js';
+import { createReader } from './reader.js';
+import { getAllNotes, deleteNote } from './storage.js';
+import {
+  downloadBook,
+  removeBookCache,
+  cancelBookDownload,
+  getAllOfflineSummaryMap,
+  getBookEstimatedLabel,
+  formatBytes,
+  onOfflineStateChange,
+} from './offline-books.js';
 
 const searchEngine = new HematologySearchEngine();
 let currentTab = 'search';
 let activeCategory = 'all';
 let activeBookFilter = 'all';
 let navLevel = 'sources'; // sources | books | articles
+let activeBookmarkSubtab = 'articles'; // articles | notes
 let catalogData = [];
 let bookmarks = JSON.parse(localStorage.getItem('gem_bookmarks') || '[]');
+let offlineSummaryMap = new Map();
+let reader = null;
 
 // DOM Elements
 const searchInput = document.getElementById('searchInput');
 const clearSearchBtn = document.getElementById('clearSearchBtn');
-const segmentBtns = document.querySelectorAll('.segment-btn');
+const segmentBtns = document.querySelectorAll('#segmentedControl .segment-btn');
 const bookFilterScroll = document.getElementById('bookFilterScroll');
 const articlesList = document.getElementById('articlesList');
 const itemCount = document.getElementById('itemCount');
-const modalOverlay = document.getElementById('modalOverlay');
-const modalTitle = document.getElementById('modalTitle');
-const modalMetaRow = document.getElementById('modalMetaRow');
-const modalBody = document.getElementById('modalBody');
-const modalCloseBtn = document.getElementById('modalCloseBtn');
 const dockButtons = document.querySelectorAll('.dock-btn');
 const searchView = document.getElementById('searchView');
 const calcView = document.getElementById('calcView');
@@ -29,9 +38,16 @@ const segmentedControl = document.getElementById('segmentedControl');
 const navTitle = document.querySelector('.nav-title');
 const bookmarksList = document.getElementById('bookmarksList');
 
-// Service Worker Registration
+// Service Worker Registration + мгновенное обновление при смене версии
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    let hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) {
+        hadController = false;
+        window.location.reload();
+      }
+    });
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   });
 }
@@ -330,9 +346,75 @@ function renderSectionTiles() {
   });
 }
 
-function renderBookTiles() {
+function renderDownloadButtonHtml(bookId, pagesCount = 0) {
+  const state = offlineSummaryMap.get(bookId) || { status: 'none' };
+  if (state.status === 'downloading') {
+    const pct = state.percent || 0;
+    const r = 8;
+    const c = 2 * Math.PI * r;
+    const offset = c - (pct / 100) * c;
+    return `
+      <button type="button" class="book-download-btn is-downloading" data-download-book="${bookId}" title="Отменить загрузку">
+        <svg class="dl-ring" viewBox="0 0 20 20"><circle class="dl-ring-bg" cx="10" cy="10" r="${r}"/><circle class="dl-ring-fg" cx="10" cy="10" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/></svg>
+        <span>${pct}% · ✕</span>
+      </button>
+    `;
+  }
+  if (state.status === 'ready') {
+    const sizeText = state.bytes ? formatBytes(state.bytes) : 'Офлайн';
+    return `
+      <button type="button" class="book-download-btn is-ready" data-download-book="${bookId}" title="Удалить из офлайн-кэша">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+        <span>Офлайн · ${sizeText}</span>
+      </button>
+    `;
+  }
+  const est = getBookEstimatedLabel(bookId, pagesCount);
+  return `
+    <button type="button" class="book-download-btn" data-download-book="${bookId}" title="Скачать учебник для чтения без интернета">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>
+      <span>Скачать (${est})</span>
+    </button>
+  `;
+}
+
+function handleDownloadClick(bookId) {
+  const state = offlineSummaryMap.get(bookId) || { status: 'none' };
+  if (state.status === 'downloading') {
+    cancelBookDownload(bookId);
+    return;
+  }
+  if (state.status === 'ready') {
+    if (confirm('Удалить скачанную книгу из офлайн-памяти устройства?')) {
+      removeBookCache(bookId);
+    }
+    return;
+  }
+  downloadBook(bookId, catalogData).catch((err) => {
+    alert(`Ошибка загрузки: ${err.message}`);
+  });
+}
+
+onOfflineStateChange((bookId, state) => {
+  offlineSummaryMap.set(bookId, state);
+  document.querySelectorAll(`[data-download-book="${bookId}"]`).forEach((btn) => {
+    const pages = Number(btn.getAttribute('data-book-pages')) || 0;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderDownloadButtonHtml(bookId, pages).trim();
+    const newBtn = tmp.firstElementChild;
+    newBtn.setAttribute('data-book-pages', String(pages));
+    newBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDownloadClick(bookId);
+    });
+    btn.replaceWith(newBtn);
+  });
+});
+
+async function renderBookTiles() {
+  offlineSummaryMap = await getAllOfflineSummaryMap();
   const groups = new Map();
-  catalogData.filter(a => a.type === 'visual').forEach(item => {
+  catalogData.filter(a => a.type === 'visual' || a.type === 'fb2').forEach(item => {
     const id = item.source?.book_id || 'other';
     if (!groups.has(id)) {
       groups.set(id, {
@@ -345,7 +427,7 @@ function renderBookTiles() {
     }
     const book = groups.get(id);
     book.chapters += 1;
-    book.pages += Array.isArray(item.search_pages) ? item.search_pages.length : 0;
+    book.pages += Array.isArray(item.search_pages) ? item.search_pages.length : (item.pdf?.pages || 0);
   });
 
   const books = [...groups.values()];
@@ -357,15 +439,16 @@ function renderBookTiles() {
       : `<span class="source-tile-icon">${SOURCE_ICON_BOOK}</span>`;
 
     return `
-    <button class="source-tile" data-book-id="${book.id}" style="animation-delay: ${Math.min(index * 40, 200)}ms">
+    <div class="source-tile source-tile--book" data-book-id="${book.id}" role="button" tabindex="0" style="animation-delay: ${Math.min(index * 40, 200)}ms">
       ${cover}
       <span class="source-tile-body">
         <span class="source-tile-kind">Учебник · визуальный</span>
         <span class="source-tile-title source-tile-title--book">${escapeHtml(book.title)}</span>
-        <span class="source-tile-count">${book.chapters} ${pluralForm(book.chapters, ['глава', 'главы', 'глав'])} · ${book.pages} стр.</span>
+        <span class="source-tile-count">${book.chapters} ${pluralForm(book.chapters, ['глава', 'главы', 'глав'])}${book.pages ? ` · ${book.pages} стр.` : ''}</span>
+        <span class="source-tile-actions-row">${renderDownloadButtonHtml(book.id, book.pages)}</span>
       </span>
       <span class="source-tile-arrow" aria-hidden="true">→</span>
-    </button>
+    </div>
   `;
   }).join('');
 
@@ -374,24 +457,41 @@ function renderBookTiles() {
   articlesList.querySelectorAll('.source-tile').forEach(tile => {
     tile.addEventListener('click', () => setActiveBookFilter(tile.getAttribute('data-book-id')));
   });
+  articlesList.querySelectorAll('[data-download-book]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDownloadClick(btn.getAttribute('data-download-book'));
+    });
+  });
 }
 
 // Render Results Grid
 function renderResults(results, showBack = false) {
   const back = getBackState();
+  const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency';
   const backTile = showBack
-    ? `<button class="back-tile" id="backToSourcesBtn">${back.label}</button>`
+    ? `<div class="book-chapter-toolbar">
+        <button class="back-tile" id="backToSourcesBtn" style="flex:1;">${back.label}</button>
+        ${showBookDl ? renderDownloadButtonHtml(activeBookFilter) : ''}
+      </div>`
     : '';
 
   const bindBack = () => {
     const backBtn = document.getElementById('backToSourcesBtn');
-    if (!backBtn) return;
-    backBtn.addEventListener('click', () => {
-      if (back.target === 'books') {
-        setNavLevel('books');
-      } else {
-        setActiveBookFilter('all');
-      }
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        if (back.target === 'books') {
+          setNavLevel('books');
+        } else {
+          setActiveBookFilter('all');
+        }
+      });
+    }
+    articlesList.querySelectorAll('[data-download-book]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleDownloadClick(btn.getAttribute('data-download-book'));
+      });
     });
   };
 
@@ -453,324 +553,30 @@ function renderResults(results, showBack = false) {
   });
 }
 
-// Modal View Logic
-function openArticleModal(article, targetPage = null) {
-  modalTitle.textContent = article.title;
-
-  // DeVita: вместо постраничных изображений показываем фрагмент оригинального PDF.
-  let pdfHtml = '';
-  if (article.pdf) {
-    const pdf = article.pdf;
-    const localPage = targetPage
-      ? Math.max(1, Math.min(pdf.pages, targetPage - pdf.start + 1))
-      : 1;
-    const pdfSrc = `${pdf.file}#page=${localPage}`;
-    pdfHtml = `
-      <div class="pdf-viewer-wrap">
-        <div class="pdf-viewer-toolbar">
-          <span>Оригинальный PDF · стр. ${pdf.start}–${pdf.end}</span>
-          <a href="${pdfSrc}" target="_blank" rel="noopener">Открыть в новой вкладке</a>
-        </div>
-        <iframe class="pdf-viewer" src="${pdfSrc}" title="${article.title} — PDF"></iframe>
-      </div>
-    `;
-  }
-
-  const typeLabel = getTypeLabel(article.type);
-  const isBookmarked = bookmarks.includes(article.id);
-
-  // Ограничиваем МКБ-10 коды до 3 элементов для гарантированного предотвращения переполнения
-  modalMetaRow.innerHTML = `
-    <span class="badge-outline">${typeLabel}</span>
-    ${article.icd10 ? article.icd10.slice(0, 3).map(c => `<span class="tag-pill">${c}</span>`).join('') : ''}
-  `;
-
-  modalBody.innerHTML = `
-    <div class="citation-box">
-      <div class="citation-header">
-        <span class="citation-source-name">${article.source.book} (${article.source.year})</span>
-        <span class="citation-page-num">стр. ${article.source.pages}</span>
-      </div>
-      <div style="font-size:0.78rem;color:var(--text-muted);">${article.source.section || ''}</div>
-      <div class="citation-actions">
-        <button id="copyCitationBtn" class="btn-minimal">Скопировать ссылку</button>
-        <button id="bookmarkBtn" class="btn-minimal">${isBookmarked ? 'В избранном' : 'В избранное'}</button>
-        ${article.source.book_id ? `<button id="bookChaptersBtn" class="btn-minimal" data-book-id="${article.source.book_id}">Главы книги</button>` : ''}
-      </div>
-    </div>
-
-    ${pdfHtml}
-    <div>
-      ${parseMarkdown(article.content_markdown)}
-    </div>
-  `;
-
-  // Bookmark Toggle
-  document.getElementById('bookmarkBtn').addEventListener('click', () => {
-    if (bookmarks.includes(article.id)) {
-      bookmarks = bookmarks.filter(b => b !== article.id);
-    } else {
-      bookmarks.push(article.id);
-    }
-    localStorage.setItem('gem_bookmarks', JSON.stringify(bookmarks));
-    openArticleModal(article);
-    if (currentTab === 'bookmarks') renderBookmarks();
-  });
-
-  // Copy citation
-  document.getElementById('copyCitationBtn').addEventListener('click', () => {
-    const text = `${article.title} — ${article.source.book} (${article.source.year}), стр. ${article.source.pages}`;
-    navigator.clipboard.writeText(text);
-    const btn = document.getElementById('copyCitationBtn');
-    btn.textContent = 'Скопировано';
-    setTimeout(() => { btn.textContent = 'Скопировать ссылку'; }, 1500);
-  });
-
-  // Кнопка "Главы книги" для быстрого фильтра по первоисточнику
-  const bookChaptersBtn = document.getElementById('bookChaptersBtn');
-  if (bookChaptersBtn) {
-    bookChaptersBtn.addEventListener('click', () => {
-      const bid = bookChaptersBtn.getAttribute('data-book-id');
-      modalOverlay.classList.remove('open');
-      setActiveBookFilter(bid);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  }
-
-  modalOverlay.classList.add('open');
-
-  // Переход к конкретной странице визуального учебника
-  if (targetPage) {
-    const targetImg = modalBody.querySelector(`.zoomable-image[data-page="${targetPage}"]`);
-    const targetFigure = targetImg && targetImg.closest('.article-figure');
-    if (targetFigure) {
-      targetFigure.classList.add('target-page');
-      requestAnimationFrame(() => {
-        const top = targetFigure.getBoundingClientRect().top
-          - modalBody.getBoundingClientRect().top
-          + modalBody.scrollTop - 12;
-        modalBody.scrollTo({ top, behavior: 'smooth' });
-      });
-    }
-  }
-
-  // Клик по иллюстрации для полноэкранного просмотра
-  modalBody.querySelectorAll('.zoomable-image').forEach(img => {
-    img.addEventListener('click', () => {
-      openLightbox(img.getAttribute('data-src'), img.getAttribute('data-caption'));
-    });
-  });
-}
-
-// Клик по интерактивным ссылкам внутри статей (гиперссылки на оглавления и главы)
-modalBody.addEventListener('click', (e) => {
-  const link = e.target.closest('.doc-link');
-  if (!link) return;
-  const targetId = link.getAttribute('data-internal-id') || link.getAttribute('href');
-  if (targetId && targetId.startsWith('#')) {
-    e.preventDefault();
-    const [cleanId, query = ''] = targetId.slice(1).split('?');
-    const targetPage = parseInt(new URLSearchParams(query).get('p'), 10) || null;
-    const targetArticle = catalogData.find(a => a.id === cleanId);
-    if (targetArticle) {
-      openArticleModal(targetArticle, targetPage);
-      const modalScroll = document.querySelector('.modal-scrollable');
-      if (modalScroll) modalScroll.scrollTop = 0;
-    }
-  }
-});
-
-// Lightbox: полноэкранный просмотр с pinch-to-zoom и панорамированием
-const lightboxModal = document.getElementById('lightboxModal');
-const lightboxImg = document.getElementById('lightboxImg');
-const lightboxCaption = document.getElementById('lightboxCaption');
-const lightboxCloseBtn = document.getElementById('lightboxCloseBtn');
-const lightboxZoomLabel = document.getElementById('lightboxZoomLabel');
-const lightboxZoomReset = document.getElementById('lightboxZoomReset');
-
-const ZOOM_MIN = 1;
-const ZOOM_MAX = 5;
-let zoomScale = 1;
-let zoomX = 0;
-let zoomY = 0;
-const activePointers = new Map();
-let pinchStart = null;
-let panStart = null;
-let tapCandidate = null;
-let lastTap = { t: 0, x: 0, y: 0 };
-
-function clampZoom(value) {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
-}
-
-function applyZoom() {
-  lightboxImg.style.transform = `translate3d(${zoomX}px, ${zoomY}px, 0) scale(${zoomScale})`;
-  lightboxModal.classList.toggle('zoomed', zoomScale > 1.01);
-  if (lightboxZoomLabel) lightboxZoomLabel.textContent = `${Math.round(zoomScale * 100)}%`;
-  if (lightboxZoomReset) lightboxZoomReset.disabled = zoomScale <= 1.01;
-}
-
-function clampPan() {
-  if (zoomScale <= 1) { zoomX = 0; zoomY = 0; return; }
-  const rect = lightboxImg.getBoundingClientRect();
-  const baseW = rect.width / zoomScale;
-  const baseH = rect.height / zoomScale;
-  const maxX = (baseW * (zoomScale - 1)) / 2 + 24;
-  const maxY = (baseH * (zoomScale - 1)) / 2 + 24;
-  zoomX = Math.min(maxX, Math.max(-maxX, zoomX));
-  zoomY = Math.min(maxY, Math.max(-maxY, zoomY));
-}
-
-function resetZoom() {
-  zoomScale = 1;
-  zoomX = 0;
-  zoomY = 0;
-  lightboxImg.classList.remove('smooth');
-  applyZoom();
-}
-
-// Масштабирование относительно точки clientX/clientY. `from` — состояние на
-// начало жеста, чтобы при pinch не накапливался дрейф между движениями.
-function zoomTo(targetScale, clientX, clientY, from) {
-  const scale = clampZoom(targetScale);
-  const rect = lightboxImg.getBoundingClientRect();
-  const start = from || { scale: zoomScale, x: zoomX, y: zoomY };
-  if (!rect.width || !rect.height) { zoomScale = scale; applyZoom(); return; }
-  const centerX = rect.left + rect.width / 2 - zoomX;
-  const centerY = rect.top + rect.height / 2 - zoomY;
-  const cx = clientX - centerX;
-  const cy = clientY - centerY;
-  const ux = (cx - start.x) / start.scale;
-  const uy = (cy - start.y) / start.scale;
-  zoomScale = scale;
-  zoomX = cx - ux * scale;
-  zoomY = cy - uy * scale;
-  clampPan();
-  applyZoom();
-}
-
-function zoomFromCenter(factor) {
-  const rect = lightboxImg.getBoundingClientRect();
-  lightboxImg.classList.add('smooth');
-  zoomTo(zoomScale * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
-}
-
-function openLightbox(src, caption) {
-  resetZoom();
-  lightboxImg.src = src;
-  lightboxCaption.textContent = caption || '';
-  lightboxModal.classList.add('open');
-}
-
-function closeLightbox() {
-  lightboxModal.classList.remove('open');
-  lightboxImg.removeAttribute('src');
-  activePointers.clear();
-  pinchStart = null;
-  panStart = null;
-  tapCandidate = null;
-  resetZoom();
-}
-
-lightboxCloseBtn.addEventListener('click', closeLightbox);
-if (lightboxZoomReset) lightboxZoomReset.addEventListener('click', resetZoom);
-document.getElementById('lightboxZoomIn')?.addEventListener('click', () => zoomFromCenter(1.5));
-document.getElementById('lightboxZoomOut')?.addEventListener('click', () => zoomFromCenter(1 / 1.5));
-
-lightboxImg.addEventListener('pointerdown', (e) => {
-  try { lightboxImg.setPointerCapture(e.pointerId); } catch (_) { /* захват недоступен — жесты работают и без него */ }
-  lightboxImg.classList.remove('smooth');
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (activePointers.size === 1) {
-    panStart = zoomScale > 1 ? { x: e.clientX, y: e.clientY, tx: zoomX, ty: zoomY } : null;
-    tapCandidate = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+function toggleBookmarkById(articleId) {
+  if (bookmarks.includes(articleId)) {
+    bookmarks = bookmarks.filter(b => b !== articleId);
   } else {
-    const [p1, p2] = [...activePointers.values()];
-    pinchStart = {
-      distance: Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1,
-      scale: zoomScale, x: zoomX, y: zoomY,
-    };
-    panStart = null;
-    tapCandidate = null;
+    bookmarks.push(articleId);
   }
-});
-
-lightboxImg.addEventListener('pointermove', (e) => {
-  if (!activePointers.has(e.pointerId)) return;
-  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (tapCandidate && Math.hypot(e.clientX - tapCandidate.x, e.clientY - tapCandidate.y) > 12) {
-    tapCandidate.moved = true;
-  }
-  if (activePointers.size >= 2 && pinchStart) {
-    const [p1, p2] = [...activePointers.values()];
-    const distance = Math.hypot(p1.x - p2.x, p1.y - p2.y);
-    zoomTo(pinchStart.scale * distance / pinchStart.distance,
-      (p1.x + p2.x) / 2, (p1.y + p2.y) / 2, pinchStart);
-  } else if (panStart) {
-    zoomX = panStart.tx + (e.clientX - panStart.x);
-    zoomY = panStart.ty + (e.clientY - panStart.y);
-    clampPan();
-    applyZoom();
-  }
-});
-
-function endLightboxPointer(e) {
-  const wasSingle = activePointers.size === 1;
-  const tap = tapCandidate;
-  activePointers.delete(e.pointerId);
-  if (activePointers.size === 1) {
-    const p = [...activePointers.values()][0];
-    panStart = zoomScale > 1 ? { x: p.x, y: p.y, tx: zoomX, ty: zoomY } : null;
-    pinchStart = null;
-  } else if (activePointers.size === 0) {
-    panStart = null;
-    pinchStart = null;
-    if (zoomScale < 1.02) { zoomX = 0; zoomY = 0; applyZoom(); }
-  }
-  // Двойной тап: приблизить к точке касания / вернуть 100%
-  if (wasSingle && tap && !tap.moved) {
-    const now = performance.now();
-    if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
-      lightboxImg.classList.add('smooth');
-      zoomTo(zoomScale > 1.4 ? 1 : 2.5, e.clientX, e.clientY);
-      lastTap = { t: 0, x: 0, y: 0 };
-    } else {
-      lastTap = { t: now, x: e.clientX, y: e.clientY };
-    }
-  }
+  localStorage.setItem('gem_bookmarks', JSON.stringify(bookmarks));
+  if (currentTab === 'bookmarks') renderBookmarks();
 }
-lightboxImg.addEventListener('pointerup', endLightboxPointer);
-lightboxImg.addEventListener('pointercancel', endLightboxPointer);
 
-lightboxImg.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  lightboxImg.classList.add('smooth');
-  zoomTo(zoomScale * Math.exp(-e.deltaY * 0.002), e.clientX, e.clientY);
-}, { passive: false });
-
-// Escape: сначала закрываем лайтбокс, затем карточку статьи; +/-/0 — zoom
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (lightboxModal.classList.contains('open')) closeLightbox();
-    else if (modalOverlay.classList.contains('open')) modalOverlay.classList.remove('open');
-    return;
-  }
-  if (!lightboxModal.classList.contains('open')) return;
-  if (e.key === '+' || e.key === '=') zoomFromCenter(1.4);
-  else if (e.key === '-' || e.key === '_') zoomFromCenter(1 / 1.4);
-  else if (e.key === '0') resetZoom();
-});
-lightboxModal.addEventListener('click', (e) => {
-  if (e.target === lightboxModal || e.target === lightboxCloseBtn) {
-    closeLightbox();
-  }
+reader = createReader({
+  parseMarkdown,
+  getCatalog: () => catalogData,
+  isBookmarked: (id) => bookmarks.includes(id),
+  onToggleBookmark: toggleBookmarkById,
+  onNotesChanged: () => {
+    if (currentTab === 'bookmarks') renderBookmarks();
+  },
 });
 
-// Close Modal
-modalCloseBtn.addEventListener('click', () => modalOverlay.classList.remove('open'));
-modalOverlay.addEventListener('click', (e) => {
-  if (e.target === modalOverlay) modalOverlay.classList.remove('open');
-});
+// Fullscreen Reader View Logic
+function openArticleModal(article, targetPage = null) {
+  if (reader) reader.open(article, targetPage);
+}
 
 // Search input handling
 searchInput.addEventListener('input', (e) => {
@@ -1024,8 +830,82 @@ dockButtons.forEach(btn => {
   });
 });
 
-function renderBookmarks() {
+const bookmarksSubtabs = document.getElementById('bookmarksSubtabs');
+
+if (bookmarksSubtabs) {
+  bookmarksSubtabs.querySelectorAll('[data-bm-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeBookmarkSubtab = btn.getAttribute('data-bm-tab');
+      bookmarksSubtabs.querySelectorAll('[data-bm-tab]').forEach(b => {
+        const isActive = b === btn;
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+      renderBookmarks();
+    });
+  });
+}
+
+async function renderBookmarks() {
+
+  if (activeBookmarkSubtab === 'notes') {
+    const notes = await getAllNotes();
+    itemCount.textContent = `${notes.length} ${pluralForm(notes.length, ['заметка', 'заметки', 'заметок'])}`;
+    if (notes.length === 0) {
+      bookmarksList.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 60px 20px;">Заметок пока нет. Откройте любую страницу или протокол и нажмите «Заметка».</div>`;
+      return;
+    }
+
+    const COLOR_MAP = {
+      blue: { label: 'Важно', hex: '#0071e3' },
+      amber: { label: 'Схема', hex: '#d97706' },
+      rose: { label: 'Дозировка', hex: '#e11d48' },
+      emerald: { label: 'Заметка', hex: '#059669' },
+    };
+
+    bookmarksList.innerHTML = notes.map(n => {
+      const col = COLOR_MAP[n.color] || COLOR_MAP.blue;
+      const dateStr = new Date(n.updatedAt || n.createdAt).toLocaleDateString('ru-RU');
+      return `
+        <article class="card-tile note-bookmark-card" data-note-id="${n.id}" data-article-id="${n.articleId}" data-page="${n.page || ''}">
+          <div>
+            <div class="card-meta-bar">
+              <span class="card-source-tag">${escapeHtml(n.bookShort || 'Источник')}${n.page ? ` · стр. ${n.page}` : ''}</span>
+              <span class="note-badge-pill" style="--note-color: ${col.hex}">${col.label}</span>
+            </div>
+            <h2 class="card-title" style="font-size: 0.92rem; margin-bottom: 6px;">${escapeHtml(n.title)}</h2>
+            <p class="note-bookmark-body">${escapeHtml(n.text)}</p>
+          </div>
+          <div class="card-footer-tags" style="justify-content: space-between; align-items: center;">
+            <span class="tag-pill">${dateStr}</span>
+            <button type="button" class="btn-minimal note-del-btn" data-delete-bm-note="${n.id}">Удалить</button>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    bookmarksList.querySelectorAll('.note-bookmark-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('[data-delete-bm-note]')) return;
+        const artId = card.getAttribute('data-article-id');
+        const page = parseInt(card.getAttribute('data-page'), 10) || null;
+        const article = catalogData.find(a => a.id === artId);
+        if (article) openArticleModal(article, page);
+      });
+    });
+
+    bookmarksList.querySelectorAll('[data-delete-bm-note]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await deleteNote(btn.getAttribute('data-delete-bm-note'));
+        renderBookmarks();
+      });
+    });
+    return;
+  }
+
   const items = catalogData.filter(item => bookmarks.includes(item.id));
+  itemCount.textContent = `${items.length} ${pluralForm(items.length, ['статья', 'статьи', 'статей'])}`;
   if (items.length === 0) {
     bookmarksList.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 60px 20px;">В избранном пока нет сохраненных статей.</div>`;
     return;

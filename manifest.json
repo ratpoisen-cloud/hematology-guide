@@ -1,13 +1,13 @@
 {
   "name": "Справочник врача-гематолога",
-  "short_name": "Гематолог",
+  "short_name": "Гематология",
   "description": "Автономный клинический справочник, алгоритмы и протоколы для врача-гематолога и ординатора",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#090d16",
-  "theme_color": "#0f172a",
+  "background_color": "#f5f5f7",
+  "theme_color": "#e11d48",
   "icons": [
     {
       "src": "icons/icon-192.png",

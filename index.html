@@ -6,12 +6,14 @@
   <title>Гематология</title>
   
   <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
   <meta name="theme-color" content="#f5f5f7">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Гематология">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 
   <link rel="stylesheet" href="./css/style.css">
 </head>
@@ -486,8 +488,14 @@
 
     <!-- Bookmarks View -->
     <main class="content-viewport" id="bookmarksView" style="display: none;">
+      <div class="bookmarks-toolbar">
+        <div class="segmented-control bookmarks-subtabs" id="bookmarksSubtabs" role="tablist">
+          <button class="segment-btn active" data-bm-tab="articles" role="tab" aria-selected="true">Статьи</button>
+          <button class="segment-btn" data-bm-tab="notes" role="tab" aria-selected="false">Заметки</button>
+        </div>
+      </div>
       <div class="results-grid" id="bookmarksList">
-        <!-- Закладки -->
+        <!-- Закладки и заметки -->
       </div>
     </main>
 
@@ -518,47 +526,95 @@
     </nav>
   </div>
 
-  <!-- Detail Modal View -->
-  <div class="modal-backdrop" id="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-card">
-      <div class="modal-handle-bar">
-        <div class="modal-drag-indicator"></div>
+  <!-- Unified Fullscreen Mobile Reader -->
+  <div class="reader-overlay" id="readerOverlay" role="dialog" aria-modal="true" aria-labelledby="readerTitle">
+    <header class="reader-topbar">
+      <button type="button" class="reader-icon-btn" id="readerCloseBtn" aria-label="Закрыть ридер">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="reader-head-text">
+        <div class="reader-title" id="readerTitle">Заголовок</div>
+        <div class="reader-subtitle" id="readerSubtitle">Источник</div>
       </div>
-      <div class="modal-top">
-        <div class="modal-header-meta">
-          <div class="meta-tag-row" id="modalMetaRow"></div>
-          <h2 class="modal-headline" id="modalTitle">Заголовок</h2>
-        </div>
-        <button class="btn-icon-close" id="modalCloseBtn" aria-label="Закрыть модальное окно">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-          </svg>
+      <div class="reader-top-actions">
+        <button type="button" class="reader-icon-btn" id="readerTocBtn" aria-label="Оглавление и главы" title="Оглавление / Главы">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button type="button" class="reader-icon-btn" id="readerBookmarkBtn" aria-label="В избранное" title="В избранное">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
         </button>
       </div>
+    </header>
 
-      <div class="modal-scrollable" id="modalBody">
-        <!-- Контент статьи -->
+    <main class="reader-stage" id="readerStage"></main>
+
+    <footer class="reader-bottombar">
+      <div class="reader-typo-bar" id="readerTypoBar" style="display: none;">
+        <div class="reader-typo-group">
+          <button type="button" class="reader-pill-btn" data-font-delta="-1" aria-label="Уменьшить шрифт">A−</button>
+          <button type="button" class="reader-pill-btn" data-font-delta="1" aria-label="Увеличить шрифт">A+</button>
+        </div>
+        <div class="reader-theme-dots">
+          <button type="button" class="theme-dot theme-dot--light" data-reader-theme="light" aria-label="Светлая тема"></button>
+          <button type="button" class="theme-dot theme-dot--sepia" data-reader-theme="sepia" aria-label="Тема сепия"></button>
+          <button type="button" class="theme-dot theme-dot--dark" data-reader-theme="dark" aria-label="Тёмная тема"></button>
+        </div>
+      </div>
+
+      <div class="reader-controls-row" id="readerPageControls">
+        <button type="button" class="reader-nav-btn" id="readerPrevBtn" aria-label="Предыдущая страница">‹</button>
+        <input type="range" class="reader-scrubber" id="readerScrubber" min="0" max="0" value="0" aria-label="Выбор страницы">
+        <button type="button" class="reader-nav-btn" id="readerNextBtn" aria-label="Следующая страница">›</button>
+      </div>
+
+      <div class="reader-controls-row reader-controls-row--text" id="readerTextControls" style="display: none;">
+        <span class="reader-page-label" id="readerTextProgress">Прочитано 0%</span>
+      </div>
+
+      <div class="reader-bottom-meta">
+        <span class="reader-page-label" id="readerPageLabel"></span>
+        <div class="reader-bottom-pills">
+          <button type="button" class="reader-pill-btn" id="readerModeToggleBtn">Свайп</button>
+          <button type="button" class="reader-pill-btn reader-pill-btn--accent" id="readerNoteBtn">
+            <span>Заметка</span>
+            <span class="reader-note-badge" id="readerNoteBadge" style="display: none;"></span>
+          </button>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Bottom Sheet: Notes -->
+    <div class="reader-sheet" id="readerNotesSheet" role="dialog" aria-modal="true" aria-labelledby="readerNotesSheetTitle">
+      <div class="reader-sheet-card">
+        <div class="reader-sheet-head">
+          <h3 id="readerNotesSheetTitle">Заметки</h3>
+          <button type="button" class="btn-icon-close" id="readerNotesCloseBtn" aria-label="Закрыть заметки">✕</button>
+        </div>
+        <div class="reader-notes-list" id="readerNotesList"></div>
+        <form class="reader-notes-form" id="readerNotesForm">
+          <div class="reader-note-colors" id="readerNoteColorRow">
+            <button type="button" class="note-color-pill active" data-color="blue" style="--dot:#0071e3">Важно</button>
+            <button type="button" class="note-color-pill" data-color="amber" style="--dot:#d97706">Схема</button>
+            <button type="button" class="note-color-pill" data-color="rose" style="--dot:#e11d48">Дозировка</button>
+            <button type="button" class="note-color-pill" data-color="emerald" style="--dot:#059669">Заметка</button>
+          </div>
+          <div class="reader-note-input-row">
+            <textarea id="readerNoteInput" rows="2" placeholder="Комментарий к странице или схеме..."></textarea>
+            <button type="submit" class="reader-note-save-btn">Сохранить</button>
+          </div>
+        </form>
       </div>
     </div>
-  </div>
 
-  <!-- Fullscreen Image Lightbox -->
-  <div class="lightbox-overlay" id="lightboxModal" role="dialog" aria-modal="true" aria-label="Просмотр иллюстрации">
-    <button class="lightbox-close-btn" id="lightboxCloseBtn" aria-label="Закрыть">
-      <svg viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-      </svg>
-    </button>
-    <div class="lightbox-content">
-      <img id="lightboxImg" class="lightbox-img" alt="Медицинская иллюстрация">
-      <div class="lightbox-zoom-controls" aria-label="Масштаб">
-        <button type="button" id="lightboxZoomOut" aria-label="Уменьшить">−</button>
-        <span id="lightboxZoomLabel">100%</span>
-        <button type="button" id="lightboxZoomIn" aria-label="Увеличить">+</button>
-        <button type="button" id="lightboxZoomReset" aria-label="Сбросить масштаб">Сбросить</button>
+    <!-- Bottom Sheet: TOC / Chapters -->
+    <div class="reader-sheet" id="readerTocSheet" role="dialog" aria-modal="true" aria-label="Оглавление">
+      <div class="reader-sheet-card">
+        <div class="reader-sheet-head">
+          <h3>Оглавление</h3>
+          <button type="button" class="btn-icon-close" id="readerTocCloseBtn" aria-label="Закрыть оглавление">✕</button>
+        </div>
+        <div class="reader-toc-list" id="readerTocList"></div>
       </div>
-      <div id="lightboxCaption" class="lightbox-caption"></div>
-      <div class="lightbox-zoom-hint">Раздвиньте пальцами или коснитесь дважды, чтобы приблизить</div>
     </div>
   </div>
 

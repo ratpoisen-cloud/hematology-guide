@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gem-ref-v23';
+const CACHE_NAME = 'gem-ref-v27';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -6,7 +6,13 @@ const ASSETS_TO_CACHE = [
   './css/style.css',
   './js/app.js',
   './js/search-engine.js',
+  './js/storage.js',
+  './js/offline-books.js',
+  './js/reader.js',
   './data/catalog.json',
+  './icons/icon.svg',
+  './icons/favicon-32.png',
+  './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
@@ -24,7 +30,8 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
+          // Сохраняем офлайн-книги пользователей (gem-book-*), удаляем только старые версии оболочки
+          if (key !== CACHE_NAME && !key.startsWith('gem-book-')) {
             return caches.delete(key);
           }
         })
@@ -36,14 +43,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      return fetch(event.request).then((networkResponse) => {
+        // Кэшируем только базовую оболочку, не забивая память нескачанными учебниками
+        const url = new URL(event.request.url);
+        const isHeavyBookAsset = url.pathname.includes('/images/') || url.pathname.includes('/pdfs/') || url.pathname.endsWith('.fb2');
+        if (networkResponse && networkResponse.status === 200 && !isHeavyBookAsset && event.request.method === 'GET') {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return networkResponse;
-      }).catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
+      });
     })
   );
 });
