@@ -1,6 +1,6 @@
 // ==========================================================================
-// Модуль загрузки и управления собственными материалами (PDF)
-// Хранение в IndexedDB, генерация превью, интеграция в каталог и поиск
+// Модуль загрузки и управления собственными материалами (PDF, FB2, Markdown, TXT)
+// Хранение в IndexedDB, привязка к разделам (Мои материалы, Учебники, Протоколы, Клинрекомендации)
 // ==========================================================================
 
 import {
@@ -30,52 +30,131 @@ export function formatFileSize(bytes) {
   return `${kb} КБ`;
 }
 
-// Извлечение метаданных PDF: число страниц и превью 1-й страницы
-export async function inspectPdfFile(file) {
-  try {
-    const pdfjsLib = await getPdfJs();
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const numPages = pdf.numPages || 1;
+// Определение формата файла по имени и MIME-типу
+export function detectFileFormat(file) {
+  const name = (file?.name || '').toLowerCase();
+  if (name.endsWith('.pdf') || file?.type === 'application/pdf') return 'pdf';
+  if (name.endsWith('.fb2') || file?.type.includes('fictionbook') || file?.type.includes('xml')) return 'fb2';
+  if (name.endsWith('.md') || name.endsWith('.markdown')) return 'markdown';
+  if (name.endsWith('.txt') || file?.type === 'text/plain') return 'txt';
+  return 'pdf';
+}
 
-    let thumbnail = null;
+export function getFormatBadgeLabel(format) {
+  if (format === 'pdf') return 'PDF';
+  if (format === 'fb2') return 'FB2';
+  if (format === 'markdown') return 'Markdown';
+  if (format === 'txt') return 'Текст';
+  return 'Документ';
+}
+
+// Определение метаданных в зависимости от формата
+export async function inspectCustomFile(file) {
+  const format = detectFileFormat(file);
+
+  if (format === 'pdf') {
     try {
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 0.5 });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d', { alpha: false });
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      thumbnail = canvas.toDataURL('image/webp', 0.8);
-      canvas.width = 1;
-      canvas.height = 1;
-    } catch (renderErr) {
-      console.warn('Could not generate PDF thumbnail:', renderErr);
-    }
+      const pdfjsLib = await getPdfJs();
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages || 1;
 
-    return { numPages, thumbnail };
+      let thumbnail = null;
+      try {
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 0.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d', { alpha: false });
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        thumbnail = canvas.toDataURL('image/webp', 0.8);
+        canvas.width = 1;
+        canvas.height = 1;
+      } catch (renderErr) {
+        console.warn('Could not generate PDF thumbnail:', renderErr);
+      }
+
+      return { format, numPages, thumbnail, title: file.name.replace(/\.[^/.]+$/, '') };
+    } catch (err) {
+      console.error('PDF inspection failed:', err);
+      return { format: 'pdf', numPages: 1, thumbnail: null, title: file.name.replace(/\.[^/.]+$/, '') };
+    }
+  }
+
+  if (format === 'fb2') {
+    try {
+      const text = await file.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'application/xml');
+
+      // Название книги
+      const titleEl = doc.querySelector('title-info > book-title');
+      const bookTitle = titleEl ? titleEl.textContent.trim() : file.name.replace(/\.[^/.]+$/, '');
+
+      // Обложка FB2
+      let thumbnail = null;
+      const coverImage = doc.querySelector('title-info > coverpage > image');
+      if (coverImage) {
+        const href = (coverImage.getAttribute('l:href') || coverImage.getAttribute('href') || '').replace(/^#/, '');
+        if (href) {
+          const binaryEl = doc.getElementById(href) || doc.querySelector(`binary[id="${href}"]`);
+          if (binaryEl) {
+            const type = binaryEl.getAttribute('content-type') || 'image/jpeg';
+            const b64 = (binaryEl.textContent || '').replace(/\s+/g, '');
+            if (b64) thumbnail = `data:${type};base64,${b64}`;
+          }
+        }
+      }
+
+      // Примерная длина в "страницах" (~2000 знаков на страницу)
+      const numPages = Math.max(1, Math.round(text.length / 2000));
+      return { format: 'fb2', numPages, thumbnail, title: bookTitle };
+    } catch (err) {
+      console.error('FB2 inspection failed:', err);
+      return { format: 'fb2', numPages: 1, thumbnail: null, title: file.name.replace(/\.[^/.]+$/, '') };
+    }
+  }
+
+  // Markdown или обычный текст
+  try {
+    const text = await file.text();
+    let detectedTitle = '';
+    const match = text.match(/^#\s+(.+)$/m);
+    if (match) detectedTitle = match[1].trim();
+    if (!detectedTitle) detectedTitle = file.name.replace(/\.[^/.]+$/, '');
+
+    const numPages = Math.max(1, Math.round(text.length / 2500));
+    return {
+      format: format === 'markdown' ? 'markdown' : 'txt',
+      numPages,
+      thumbnail: null,
+      title: detectedTitle,
+      snippet: text.slice(0, 300),
+    };
   } catch (err) {
-    console.error('PDF inspection failed:', err);
-    return { numPages: 1, thumbnail: null };
+    return { format: 'markdown', numPages: 1, thumbnail: null, title: file.name.replace(/\.[^/.]+$/, '') };
   }
 }
 
-// Добавление пользовательского PDF-документа в IndexedDB
-export async function importCustomPdf({ file, title, category }) {
+// Добавление пользовательского документа в IndexedDB
+export async function importCustomDocument({ file, title, category, section }) {
   if (!file) throw new Error('Файл не выбран');
-  const cleanTitle = (title || file.name.replace(/\.[^/.]+$/, '')).trim();
-  const { numPages, thumbnail } = await inspectPdfFile(file);
+  const info = await inspectCustomFile(file);
+  const cleanTitle = (title || info.title || file.name.replace(/\.[^/.]+$/, '')).trim();
 
   const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const record = {
     id,
     title: cleanTitle,
     category: (category || 'Клинический протокол').trim(),
+    section: section || 'my-materials', // 'my-materials' | 'books' | 'emergency' | 'cr-rf'
+    format: info.format,
     size: file.size,
-    pages: numPages,
+    pages: info.numPages,
     blob: file,
-    thumbnail,
+    thumbnail: info.thumbnail,
+    snippet: info.snippet || '',
     addedAt: Date.now(),
   };
 
@@ -83,31 +162,65 @@ export async function importCustomPdf({ file, title, category }) {
   return record;
 }
 
+function getSectionMeta(sectionId) {
+  if (sectionId === 'emergency') {
+    return { book_id: 'emergency', book_title: 'Неотложные протоколы', book_short: 'Неотложные' };
+  }
+  if (sectionId === 'books') {
+    return { book_id: 'custom-books', book_title: 'Учебники', book_short: 'Учебники' };
+  }
+  if (sectionId === 'cr-rf') {
+    return { book_id: 'cr-rf', book_title: 'Клинические рекомендации РФ', book_short: 'Клинрекомендации' };
+  }
+  return { book_id: 'my-materials', book_title: 'Мои материалы', book_short: 'Мои материалы' };
+}
+
 // Преобразование записи из IndexedDB в элемент каталога статей для приложения
 export function customMaterialToCatalogItem(record) {
-  return {
+  const meta = getSectionMeta(record.section || 'my-materials');
+  const fmt = record.format || 'pdf';
+
+  const item = {
     id: record.id,
     title: record.title,
-    category: record.category || 'Мои материалы',
+    category: record.category || meta.book_short,
+    format: fmt,
+    type: fmt === 'pdf' ? 'pdf' : (fmt === 'fb2' ? 'fb2' : 'markdown'),
+    targetSection: record.section || 'my-materials',
     source: {
-      book_id: 'my-materials',
-      book_title: 'Мои материалы',
-      book_short: 'Мои материалы',
+      book_id: meta.book_id,
+      book_title: meta.book_title,
+      book_short: meta.book_short,
+      book_tile_title: record.title,
+      book_cover: record.thumbnail || null,
       year: new Date(record.addedAt || Date.now()).getFullYear(),
-    },
-    type: 'pdf',
-    pdf: {
-      isCustom: true,
-      customId: record.id,
-      pages: record.pages || 1,
-      start: 1,
-      end: record.pages || 1,
     },
     customThumbnail: record.thumbnail || null,
     fileSize: record.size || 0,
     addedAt: record.addedAt || Date.now(),
     isCustom: true,
+    customId: record.id,
   };
+
+  if (fmt === 'pdf') {
+    item.pdf = {
+      isCustom: true,
+      customId: record.id,
+      pages: record.pages || 1,
+      start: 1,
+      end: record.pages || 1,
+    };
+  } else if (fmt === 'fb2') {
+    item.fb2 = {
+      isCustom: true,
+      customId: record.id,
+      file: '',
+    };
+  } else {
+    item.content_markdown = record.snippet || '';
+  }
+
+  return item;
 }
 
 // Загрузка всех пользовательских материалов в виде элементов каталога

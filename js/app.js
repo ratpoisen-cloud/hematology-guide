@@ -11,12 +11,15 @@ import {
   onOfflineStateChange,
 } from './offline-books.js';
 import {
-  importCustomPdf,
+  importCustomDocument,
   loadCustomCatalogItems,
   deleteCustomMaterial,
   getAllCustomMaterials,
   formatFileSize,
   customMaterialToCatalogItem,
+  detectFileFormat,
+  getFormatBadgeLabel,
+  inspectCustomFile,
 } from './custom-materials.js';
 
 const searchEngine = new HematologySearchEngine();
@@ -312,12 +315,16 @@ function parseMarkdown(md) {
     }
 
     // Заголовки
-    if (line.startsWith('### ')) {
-      output.push(`<h3>${formatInlineMarkdown(line.slice(4))}</h3>`);
+    if (line.startsWith('# ')) {
+      output.push(`<h2>${formatInlineMarkdown(line.slice(2))}</h2>`);
       continue;
     }
     if (line.startsWith('## ')) {
       output.push(`<h3>${formatInlineMarkdown(line.slice(3))}</h3>`);
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      output.push(`<h4>${formatInlineMarkdown(line.slice(4))}</h4>`);
       continue;
     }
 
@@ -369,28 +376,33 @@ function pluralForm(n, forms) {
 // Единое правило кнопки возврата: всегда на 1 уровень выше ("← В <родительский раздел>")
 function getBackState() {
   if (calcReturnContext) return { label: '← В калькулятор', target: 'calc' };
-  if (activeBookFilter === 'emergency' || activeBookFilter === 'my-materials') return { label: '← В источники', target: 'sources' };
+  if (activeBookFilter === 'emergency' || activeBookFilter === 'my-materials' || activeBookFilter === 'cr-rf') return { label: '← В источники', target: 'sources' };
   if (activeBookFilter && activeBookFilter !== 'all') return { label: '← В учебники', target: 'books' };
   return { label: '← В источники', target: 'sources' };
 }
 
 function renderSectionTiles() {
-  const visualItems = catalogData.filter(a => a.type === 'visual');
-  const bookIds = new Set(visualItems.map(a => a.source?.book_id));
-  const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency');
-  const customItems = catalogData.filter(a => a.source?.book_id === 'my-materials');
+  const visualItems = catalogData.filter(a => a.type === 'visual' || a.type === 'fb2' || a.targetSection === 'books');
+  const bookIds = new Set(visualItems.map(a => a.source?.book_id).filter(Boolean));
+  const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency' || a.targetSection === 'emergency');
+  const crRfItems = catalogData.filter(a => a.source?.book_id === 'cr-rf' || a.targetSection === 'cr-rf');
+  const customItems = catalogData.filter(a => a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials' || (a.isCustom && !a.targetSection));
 
   const sections = [];
-  if (customItems.length) {
-    sections.push({
-      nav: 'filter',
-      bookId: 'my-materials',
-      kind: 'Мои материалы',
-      title: 'Мои материалы (PDF)',
-      countText: `${customItems.length} ${pluralForm(customItems.length, ['документ', 'документа', 'документов'])}`,
-      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
-    });
-  }
+
+  // 1. Мои материалы (всегда отображается в источниках)
+  sections.push({
+    nav: 'filter',
+    bookId: 'my-materials',
+    kind: 'Мои материалы',
+    title: 'Мои материалы',
+    countText: customItems.length
+      ? `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`
+      : '0 материалов · Нажмите для добавления',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
+  });
+
+  // 2. Учебники
   if (bookIds.size) {
     sections.push({
       nav: 'books',
@@ -400,6 +412,8 @@ function renderSectionTiles() {
       icon: SOURCE_ICON_STACK,
     });
   }
+
+  // 3. Неотложные протоколы
   if (emergencyItems.length) {
     sections.push({
       nav: 'filter',
@@ -408,6 +422,18 @@ function renderSectionTiles() {
       title: 'Неотложные протоколы',
       countText: `${emergencyItems.length} ${pluralForm(emergencyItems.length, ['протокол', 'протокола', 'протоколов'])}`,
       icon: SOURCE_ICON_DOC,
+    });
+  }
+
+  // 4. Клинические рекомендации РФ
+  if (crRfItems.length) {
+    sections.push({
+      nav: 'filter',
+      bookId: 'cr-rf',
+      kind: 'Рекомендации',
+      title: 'Клинические рекомендации РФ',
+      countText: `${crRfItems.length} ${pluralForm(crRfItems.length, ['документ', 'документа', 'документов'])}`,
+      icon: SOURCE_ICON_BOOK,
     });
   }
 
@@ -430,7 +456,16 @@ function renderSectionTiles() {
       if (tile.getAttribute('data-nav') === 'books') {
         setNavLevel('books');
       } else {
-        setActiveBookFilter(tile.getAttribute('data-book-id'));
+        const bid = tile.getAttribute('data-book-id');
+        if (bid === 'my-materials' && customItems.length === 0) {
+          const sheet = document.getElementById('customUploadSheet');
+          if (sheet) {
+            renderCustomMaterialsList();
+            sheet.classList.add('open');
+            return;
+          }
+        }
+        setActiveBookFilter(bid);
       }
     });
   });
@@ -504,20 +539,22 @@ onOfflineStateChange((bookId, state) => {
 async function renderBookTiles() {
   offlineSummaryMap = await getAllOfflineSummaryMap();
   const groups = new Map();
-  catalogData.filter(a => a.type === 'visual' || a.type === 'fb2').forEach(item => {
-    const id = item.source?.book_id || 'other';
+  catalogData.filter(a => a.type === 'visual' || a.type === 'fb2' || a.targetSection === 'books' || a.source?.book_id === 'custom-books').forEach(item => {
+    const id = item.isCustom ? item.id : (item.source?.book_id || 'other');
     if (!groups.has(id)) {
       groups.set(id, {
         id,
-        title: item.source?.book_tile_title || item.source?.book || item.source?.book_short || id,
-        cover: item.source?.book_cover || null,
+        isCustom: item.isCustom,
+        item: item.isCustom ? item : null,
+        title: item.isCustom ? item.title : (item.source?.book_tile_title || item.source?.book || item.source?.book_short || id),
+        cover: item.customThumbnail || item.source?.book_cover || null,
         chapters: 0,
         pages: 0,
       });
     }
     const book = groups.get(id);
     book.chapters += 1;
-    book.pages += Array.isArray(item.search_pages) ? item.search_pages.length : (item.pdf?.pages || 0);
+    book.pages += item.pages || (Array.isArray(item.search_pages) ? item.search_pages.length : (item.pdf?.pages || 0));
   });
 
   const books = [...groups.values()];
@@ -529,13 +566,13 @@ async function renderBookTiles() {
       : `<span class="source-tile-icon">${SOURCE_ICON_BOOK}</span>`;
 
     return `
-    <div class="source-tile source-tile--book" data-book-id="${book.id}" role="button" tabindex="0" style="animation-delay: ${Math.min(index * 40, 200)}ms">
+    <div class="source-tile source-tile--book" data-book-id="${book.id}" ${book.isCustom ? 'data-custom-book="true"' : ''} role="button" tabindex="0" style="animation-delay: ${Math.min(index * 40, 200)}ms">
       ${cover}
       <span class="source-tile-body">
-        <span class="source-tile-kind">Учебник · визуальный</span>
+        <span class="source-tile-kind">${book.isCustom ? 'Пользовательский материал' : 'Учебник · визуальный'}</span>
         <span class="source-tile-title source-tile-title--book">${escapeHtml(book.title)}</span>
         <span class="source-tile-count">${book.chapters} ${pluralForm(book.chapters, ['глава', 'главы', 'глав'])}${book.pages ? ` · ${book.pages} стр.` : ''}</span>
-        <span class="source-tile-actions-row">${renderDownloadButtonHtml(book.id, book.pages)}</span>
+        ${book.isCustom ? '' : `<span class="source-tile-actions-row">${renderDownloadButtonHtml(book.id, book.pages)}</span>`}
       </span>
       <span class="source-tile-arrow" aria-hidden="true">→</span>
     </div>
@@ -545,7 +582,18 @@ async function renderBookTiles() {
   document.getElementById('backToSectionsBtn').addEventListener('click', () => setNavLevel('sources'));
 
   articlesList.querySelectorAll('.source-tile').forEach(tile => {
-    tile.addEventListener('click', () => setActiveBookFilter(tile.getAttribute('data-book-id')));
+    tile.addEventListener('click', () => {
+      const bookId = tile.getAttribute('data-book-id');
+      const isCustom = tile.getAttribute('data-custom-book') === 'true';
+      if (isCustom) {
+        const item = catalogData.find(a => a.id === bookId);
+        if (item && reader) {
+          reader.open(item);
+          return;
+        }
+      }
+      setActiveBookFilter(bookId);
+    });
   });
   articlesList.querySelectorAll('[data-download-book]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -558,7 +606,7 @@ async function renderBookTiles() {
 // Render Results Grid
 function renderResults(results, showBack = false, calcResults = []) {
   const back = getBackState();
-  const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency';
+  const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency' && activeBookFilter !== 'my-materials';
   const backTile = showBack
     ? `<div class="book-chapter-toolbar">
         <button class="back-tile" id="backToSourcesBtn">${back.label}</button>
@@ -598,12 +646,21 @@ function renderResults(results, showBack = false, calcResults = []) {
   const totalCount = (results?.length || 0) + (calcResults?.length || 0);
   if (totalCount === 0) {
     itemCount.textContent = '0 записей';
+    const isMyMaterials = activeBookFilter === 'my-materials';
     articlesList.innerHTML = backTile + `
       <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
-        <p style="font-size: 0.95rem; font-weight: 500;">Ничего не найдено</p>
-        <p style="font-size: 0.8rem; margin-top: 4px;">Попробуйте выбрать другой источник или поисковый запрос</p>
+        <p style="font-size: 0.95rem; font-weight: 500;">${isMyMaterials ? 'В разделе «Мои материалы» пока нет файлов' : 'Ничего не найдено'}</p>
+        <p style="font-size: 0.8rem; margin-top: 4px;">${isMyMaterials ? 'Загрузите PDF, FB2, Markdown или TXT для оффлайн-доступа' : 'Попробуйте выбрать другой источник или поисковый запрос'}</p>
+        ${isMyMaterials ? `<button type="button" class="btn-primary-action" id="emptyUploadBtn" style="margin-top: 14px; max-width: 220px; display: inline-block;">+ Загрузить материал</button>` : ''}
       </div>`;
     bindBack();
+    document.getElementById('emptyUploadBtn')?.addEventListener('click', () => {
+      const sheet = document.getElementById('customUploadSheet');
+      if (sheet) {
+        renderCustomMaterialsList();
+        sheet.classList.add('open');
+      }
+    });
     return;
   }
 
@@ -622,9 +679,10 @@ function renderResults(results, showBack = false, calcResults = []) {
   `).join('');
 
   articlesList.innerHTML = backTile + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
-    const bookTitle = item.source.book_short || item.source.book;
-    const pageLabel = page ? `стр. ${page}` : `стр. ${item.source.pages}`;
+    const bookTitle = item.source?.book_short || item.source?.book || 'Материал';
+    const pageLabel = page ? `стр. ${page}` : (item.pages ? `${item.pages} стр.` : `стр. ${item.source?.pages || 1}`);
     const hasIcd = Array.isArray(item.icd10) && item.icd10.length > 0;
+    const formatBadge = item.isCustom ? `<span class="tag-pill" style="color: var(--accent);">${getFormatBadgeLabel(item.format || 'pdf')}</span>` : '';
 
     return `
       <article class="card-tile" data-id="${item.id}" data-page="${page || ''}" style="animation-delay: ${Math.min(index * 25, 200)}ms">
@@ -645,11 +703,10 @@ function renderResults(results, showBack = false, calcResults = []) {
           ` : ''}
         </div>
 
-        ${hasIcd ? `
-          <div class="card-footer-tags">
-            ${item.icd10.slice(0, 3).map(c => `<span class="tag-pill">${c}</span>`).join('')}
-          </div>
-        ` : ''}
+        <div class="card-footer-tags">
+          ${formatBadge}
+          ${hasIcd ? item.icd10.slice(0, 3).map(c => `<span class="tag-pill">${c}</span>`).join('') : ''}
+        </div>
       </article>
     `;
   }).join('');
@@ -1562,24 +1619,51 @@ async function renderCustomMaterialsList() {
     return;
   }
 
-  container.innerHTML = list.map((item) => `
-    <div class="custom-doc-item">
-      ${item.thumbnail
-        ? `<img class="custom-doc-thumb" src="${item.thumbnail}" alt="">`
-        : `<div class="custom-doc-thumb">PDF</div>`
-      }
-      <div class="custom-doc-meta">
-        <div class="custom-doc-title">${escapeHtml(item.title)}</div>
-        <div class="custom-doc-sub">${escapeHtml(item.category)} · ${formatFileSize(item.size)} · ${item.pages || 1} стр.</div>
+  container.innerHTML = list.map((item) => {
+    const fmt = item.format || 'pdf';
+    const fmtBadge = getFormatBadgeLabel(fmt);
+    const secName = item.section === 'books'
+      ? 'Учебники'
+      : (item.section === 'emergency'
+        ? 'Протоколы'
+        : (item.section === 'cr-rf' ? 'Клинрекомендации' : 'Мои материалы'));
+
+    return `
+      <div class="custom-doc-item" data-custom-id="${item.id}" style="cursor: pointer;" title="Нажмите для чтения">
+        ${item.thumbnail
+          ? `<img class="custom-doc-thumb" src="${item.thumbnail}" alt="">`
+          : `<div class="custom-doc-thumb">${fmtBadge}</div>`
+        }
+        <div class="custom-doc-meta">
+          <div class="custom-doc-title">${escapeHtml(item.title)}</div>
+          <div class="custom-doc-sub">
+            <span class="custom-doc-badge custom-doc-badge--format">${fmtBadge}</span>
+            <span class="custom-doc-badge custom-doc-badge--section">${secName}</span>
+            <span>${escapeHtml(item.category || '')} · ${formatFileSize(item.size)}</span>
+          </div>
+        </div>
+        <button type="button" class="custom-doc-delete-btn" data-delete-custom="${item.id}" title="Удалить документ">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        </button>
       </div>
-      <button type="button" class="custom-doc-delete-btn" data-delete-custom="${item.id}" title="Удалить документ">
-        <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-  `).join('');
+    `;
+  }).join('');
+
+  container.querySelectorAll('.custom-doc-item').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-delete-custom]')) return;
+      const id = row.getAttribute('data-custom-id');
+      const item = catalogData.find((a) => a.id === id);
+      if (item && reader) {
+        document.getElementById('customUploadSheet')?.classList.remove('open');
+        reader.open(item);
+      }
+    });
+  });
 
   container.querySelectorAll('[data-delete-custom]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       const id = btn.getAttribute('data-delete-custom');
       const ok = confirm('Удалить этот документ из локального хранилища?');
       if (!ok) return;
@@ -1589,12 +1673,14 @@ async function renderCustomMaterialsList() {
       renderBookFilters();
       if (currentTab === 'search') {
         if (activeBookFilter === 'my-materials') {
-          const remaining = catalogData.filter((a) => a.source?.book_id === 'my-materials');
+          const remaining = catalogData.filter((a) => a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials');
           if (remaining.length === 0) {
             setActiveBookFilter('all');
           } else {
             performSearch();
           }
+        } else if (navLevel === 'books') {
+          renderBookTiles();
         } else {
           renderSectionTiles();
         }
@@ -1616,6 +1702,7 @@ function initCustomMaterialsModule() {
   const chooseFileBtn = document.getElementById('customChooseFileBtn');
   const uploadForm = document.getElementById('customUploadForm');
   const titleInput = document.getElementById('customTitleInput');
+  const sectionSelect = document.getElementById('customSectionSelect');
   const categorySelect = document.getElementById('customCategorySelect');
   const submitBtn = document.getElementById('customSubmitUploadBtn');
   const cancelBtn = document.getElementById('customCancelUploadBtn');
@@ -1627,20 +1714,37 @@ function initCustomMaterialsModule() {
   };
 
   document.getElementById('openUploadSheetBtn')?.addEventListener('click', openSheet);
-  document.getElementById('homeUploadMaterialBtn')?.addEventListener('click', openSheet);
   uploadClose?.addEventListener('click', () => uploadSheet?.classList.remove('open'));
 
-  const handleSelectedFile = (file) => {
+  const handleSelectedFile = async (file) => {
     if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Пожалуйста, выберите файл в формате PDF');
+    const name = file.name.toLowerCase();
+    const isSupported = name.endsWith('.pdf') || name.endsWith('.fb2') || name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt') || file.type.includes('pdf') || file.type.includes('fictionbook') || file.type.includes('xml') || file.type.includes('markdown') || file.type.includes('text');
+    if (!isSupported) {
+      alert('Пожалуйста, выберите файл в формате PDF, FB2, Markdown (.md) или TXT');
       return;
     }
     pendingUploadFile = file;
-    if (titleInput) titleInput.value = file.name.replace(/\.[^/.]+$/, '');
+    const format = detectFileFormat(file);
+    const fmtBadge = getFormatBadgeLabel(format);
+
+    let displayTitle = file.name.replace(/\.[^/.]+$/, '');
+    try {
+      const info = await inspectCustomFile(file);
+      if (info && info.title) {
+        displayTitle = info.title;
+      }
+    } catch (_) {}
+
+    if (titleInput) titleInput.value = displayTitle;
     if (dropZone) dropZone.style.display = 'none';
     if (uploadForm) uploadForm.style.display = 'block';
-    if (statusEl) statusEl.textContent = `Выбран файл: ${file.name} (${formatFileSize(file.size)})`;
+
+    if (format === 'fb2' && sectionSelect && sectionSelect.value === 'my-materials') {
+      sectionSelect.value = 'books';
+    }
+
+    if (statusEl) statusEl.textContent = `Выбран файл (${fmtBadge}): ${file.name} (${formatFileSize(file.size)})`;
   };
 
   chooseFileBtn?.addEventListener('click', () => fileInput?.click());
@@ -1687,20 +1791,29 @@ function initCustomMaterialsModule() {
       submitBtn.disabled = true;
       submitBtn.textContent = 'Обработка и сохранение…';
     }
-    if (statusEl) statusEl.textContent = 'Генерация страниц и запись в IndexedDB…';
+    if (statusEl) statusEl.textContent = 'Сохранение документа в защищенное хранилище…';
 
     try {
-      const rec = await importCustomPdf({
+      const rec = await importCustomDocument({
         file: pendingUploadFile,
         title: titleInput?.value,
         category: categorySelect?.value,
+        section: sectionSelect?.value || 'my-materials',
       });
 
       const catalogItem = customMaterialToCatalogItem(rec);
       catalogData.unshift(catalogItem);
       searchEngine.loadData(catalogData);
       renderBookFilters();
-      if (currentTab === 'search') renderSectionTiles();
+      if (currentTab === 'search') {
+        if (navLevel === 'books') {
+          renderBookTiles();
+        } else if (activeBookFilter === 'my-materials' || activeBookFilter === rec.section) {
+          performSearch();
+        } else {
+          renderSectionTiles();
+        }
+      }
       await renderCustomMaterialsList();
 
       showToast(`✓ Документ «${rec.title}» добавлен!`);

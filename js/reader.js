@@ -214,8 +214,9 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   let activeCustomBlobUrl = null;
 
   function detectFormat(article) {
-    if (article?.fb2?.file || article?.type === 'fb2') return 'fb2';
-    if (article?.pdf?.file || article?.pdf?.isCustom || article?.isCustom) return 'pdf';
+    if (article?.format === 'fb2' || article?.fb2?.file || article?.type === 'fb2') return 'fb2';
+    if (article?.format === 'markdown' || article?.format === 'txt' || article?.type === 'markdown' || article?.type === 'txt') return 'markdown';
+    if (article?.pdf?.file || article?.pdf?.isCustom || (article?.isCustom && (article?.format === 'pdf' || article?.type === 'pdf')) || (article?.isCustom && !article?.format && !article?.type)) return 'pdf';
     if (article?.type === 'visual' && extractWebpPages(article).length > 0) return 'images';
     return 'markdown';
   }
@@ -620,9 +621,16 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     if (format === 'fb2') {
       stageEl.innerHTML = `<div class="reader-text-wrap"><div class="reader-loader">Загрузка книги FB2…</div></div>`;
       try {
-        const resp = await fetch(currentArticle.fb2.file);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const xmlText = await resp.text();
+        let xmlText = '';
+        if (currentArticle.isCustom && currentArticle.customId) {
+          const rec = await getCustomMaterial(currentArticle.customId);
+          if (!rec || !rec.blob) throw new Error('Файл не найден в локальном хранилище');
+          xmlText = await rec.blob.text();
+        } else {
+          const resp = await fetch(currentArticle.fb2.file);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          xmlText = await resp.text();
+        }
         const parsed = parseFb2Xml(xmlText);
         bodyHtml = parsed.html;
         tocItems = parsed.toc;
@@ -630,6 +638,16 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
         bodyHtml = `<p class="reader-error">Не удалось загрузить FB2: ${escapeHtml(err.message)}</p>`;
       }
     } else {
+      if (currentArticle.isCustom && currentArticle.customId && !currentArticle.content_markdown) {
+        try {
+          const rec = await getCustomMaterial(currentArticle.customId);
+          if (rec && rec.blob) {
+            currentArticle.content_markdown = await rec.blob.text();
+          }
+        } catch (err) {
+          console.warn('Could not read custom markdown blob:', err);
+        }
+      }
       bodyHtml = parseMarkdown(currentArticle.content_markdown || '');
     }
 

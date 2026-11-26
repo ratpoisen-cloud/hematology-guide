@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-title" content="Гематология">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/style.css?v=47">
   <script>try{if(localStorage.getItem('gem_app_theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
 </head>
 <body>
@@ -86,17 +86,6 @@
             </span>
             <span class="source-tile-arrow" aria-hidden="true">→</span>
           </button>
-
-          <button type="button" class="source-tile home-section-tile" id="homeUploadMaterialBtn">
-            <span class="source-tile-icon" style="color: #059669; background: rgba(5, 150, 105, 0.1);">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-            </span>
-            <span class="source-tile-body">
-              <span class="source-tile-title">Мои материалы</span>
-              <span class="source-tile-count">Загрузка собственных PDF в оффлайн-базу</span>
-            </span>
-            <span class="source-tile-arrow" aria-hidden="true">+</span>
-          </button>
         </div>
       </section>
 
@@ -149,7 +138,7 @@
       <div class="materials-action-bar" id="materialsActionBar">
         <button type="button" class="materials-upload-pill" id="openUploadSheetBtn">
           <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-          <span>Загрузить свой PDF</span>
+          <span>Загрузить материал</span>
         </button>
       </div>
       <div class="results-grid" id="articlesList">
@@ -724,11 +713,11 @@
     </div>
   </div>
 
-  <!-- Upload Custom PDF Sheet -->
+  <!-- Upload Custom Materials Sheet -->
   <div class="reader-sheet" id="customUploadSheet" role="dialog" aria-modal="true" aria-label="Загрузка собственных материалов">
     <div class="reader-sheet-card">
       <div class="reader-sheet-head">
-        <h3>Мои материалы (PDF)</h3>
+        <h3>Загрузка материалов</h3>
         <button type="button" class="btn-icon-close" id="customUploadClose" aria-label="Закрыть">✕</button>
       </div>
 
@@ -736,21 +725,31 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="44" height="44" style="color: var(--accent);">
           <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
         </svg>
-        <p class="upload-zone-text">Перетащите PDF сюда или нажмите кнопку ниже</p>
-        <input type="file" id="customFileInput" accept="application/pdf" style="display: none;">
-        <button type="button" class="btn-secondary" id="customChooseFileBtn">Выбрать PDF на устройстве</button>
-        <span class="upload-zone-hint">Файлы сохраняются в защищенном локальном хранилище и доступны без интернета</span>
+        <p class="upload-zone-text">Перетащите файл сюда или нажмите кнопку ниже</p>
+        <input type="file" id="customFileInput" accept=".pdf,.fb2,.md,.txt,application/pdf,text/xml,application/x-fictionbook+xml,text/markdown,text/plain" style="display: none;">
+        <button type="button" class="btn-secondary" id="customChooseFileBtn">Выбрать файл на устройстве</button>
+        <span class="upload-zone-hint">Поддерживаются PDF, FB2, Markdown (.md) и TXT. Файлы сохраняются в защищенном локальном хранилище и доступны без интернета.</span>
       </div>
 
       <form id="customUploadForm" style="display: none; margin-top: 16px;">
         <div class="field-item">
           <label class="field-label" for="customTitleInput">Название документа</label>
-          <input type="text" id="customTitleInput" class="text-input" placeholder="Название протокола или статьи" required>
+          <input type="text" id="customTitleInput" class="text-input" placeholder="Название протокола, статьи или книги" required>
         </div>
         <div class="field-item" style="margin-top: 10px;">
-          <label class="field-label" for="customCategorySelect">Категория</label>
+          <label class="field-label" for="customSectionSelect">Раздел в источниках</label>
+          <select id="customSectionSelect" class="text-input">
+            <option value="my-materials" selected>Мои материалы (персональный раздел)</option>
+            <option value="books">Учебники</option>
+            <option value="emergency">Неотложные протоколы</option>
+            <option value="cr-rf">Клинические рекомендации РФ</option>
+          </select>
+        </div>
+        <div class="field-item" style="margin-top: 10px;">
+          <label class="field-label" for="customCategorySelect">Категория документа</label>
           <select id="customCategorySelect" class="text-input">
             <option value="Клинический протокол" selected>Клинический протокол</option>
+            <option value="Учебное пособие">Учебное пособие / Книга</option>
             <option value="Локальный алгоритм">Локальный алгоритм больницы</option>
             <option value="Статья / Исследование">Статья / Исследование</option>
             <option value="Памятка / Инструкция">Памятка / Инструкция</option>
@@ -775,6 +774,6 @@
   <!-- Toast Notification -->
   <div class="toast-popup" id="toastPopup" role="status" aria-live="polite"></div>
 
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/app.js?v=47"></script>
 </body>
 </html>

@@ -2958,6 +2958,34 @@ body.on-home {
   font-size: 0.74rem;
   color: var(--text-muted);
   margin-top: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.custom-doc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.custom-doc-badge--format {
+  background: rgba(0, 113, 227, 0.08);
+  color: var(--accent);
+  border-color: rgba(0, 113, 227, 0.2);
+}
+
+.custom-doc-badge--section {
+  background: rgba(5, 150, 105, 0.08);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.2);
 }
 
 .custom-doc-delete-btn {
