@@ -93,7 +93,8 @@ export function parseFb2Xml(xmlText) {
     const tag = node.localName;
 
     if (tag === 'section') {
-      const secId = `fb2-sec-${++secCounter}`;
+      const xmlId = node.getAttribute('id');
+      const secId = xmlId || `fb2-sec-${++secCounter}`;
       const titleEl = [...node.children].find((c) => c.localName === 'title');
       const titleText = titleEl ? titleEl.textContent.replace(/\s+/g, ' ').trim() : '';
       if (titleText) {
@@ -106,23 +107,26 @@ export function parseFb2Xml(xmlText) {
         }
         return renderBlock(c, depth + 1);
       }).join('');
-      return `<section class="fb2-section">${childrenHtml}</section>`;
+      return `<section id="${secId}" class="fb2-section">${childrenHtml}</section>`;
     }
 
-    if (tag === 'p') return `<p>${[...node.childNodes].map(renderInline).join('')}</p>`;
-    if (tag === 'subtitle') return `<h4 class="fb2-subtitle">${[...node.childNodes].map(renderInline).join('')}</h4>`;
+    const elemId = node.getAttribute('id');
+    const idAttr = elemId ? ` id="${escapeHtml(elemId)}"` : '';
+
+    if (tag === 'p') return `<p${idAttr}>${[...node.childNodes].map(renderInline).join('')}</p>`;
+    if (tag === 'subtitle') return `<h4${idAttr} class="fb2-subtitle">${[...node.childNodes].map(renderInline).join('')}</h4>`;
     if (tag === 'empty-line') return '<div class="fb2-spacer"></div>';
     if (tag === 'epigraph' || tag === 'cite') {
-      return `<blockquote>${[...node.children].map((c) => renderBlock(c, depth)).join('')}</blockquote>`;
+      return `<blockquote${idAttr}>${[...node.children].map((c) => renderBlock(c, depth)).join('')}</blockquote>`;
     }
     if (tag === 'poem' || tag === 'stanza') {
-      return `<div class="fb2-stanza">${[...node.children].map((c) => renderBlock(c, depth)).join('')}</div>`;
+      return `<div${idAttr} class="fb2-stanza">${[...node.children].map((c) => renderBlock(c, depth)).join('')}</div>`;
     }
-    if (tag === 'v') return `<p class="fb2-verse">${[...node.childNodes].map(renderInline).join('')}</p>`;
+    if (tag === 'v') return `<p${idAttr} class="fb2-verse">${[...node.childNodes].map(renderInline).join('')}</p>`;
     if (tag === 'image') {
       const href = (node.getAttribute('l:href') || node.getAttribute('href') || '').replace(/^#/, '');
       const src = binaries.get(href);
-      return src ? `<figure class="article-figure"><img src="${src}" alt="" loading="lazy"></figure>` : '';
+      return src ? `<figure${idAttr} class="article-figure"><img src="${src}" alt="" loading="lazy"></figure>` : '';
     }
     if (tag === 'table') {
       const rows = [...node.querySelectorAll('tr')].map((tr) => {
@@ -132,16 +136,27 @@ export function parseFb2Xml(xmlText) {
         }).join('');
         return `<tr>${cells}</tr>`;
       }).join('');
-      return `<div class="table-scroll-container"><table>${rows}</table></div>`;
+      return `<div${idAttr} class="table-scroll-container"><table>${rows}</table></div>`;
     }
     return [...node.children].map((c) => renderBlock(c, depth)).join('');
   }
 
   const bodies = [...(doc.documentElement?.children || [])].filter((el) => el.localName === 'body');
-  const html = bodies
-    .filter((b) => b.getAttribute('name') !== 'notes')
+  const mainBodies = bodies.filter((b) => b.getAttribute('name') !== 'notes');
+  const notesBodies = bodies.filter((b) => b.getAttribute('name') === 'notes');
+
+  let html = mainBodies
     .map((b) => [...b.children].map((c) => renderBlock(c, 1)).join(''))
     .join('');
+
+  if (notesBodies.length > 0) {
+    html += '<section class="fb2-notes-container" style="margin-top: 36px; border-top: 1px solid rgba(128,128,128,0.25); padding-top: 20px;">';
+    html += '<h2 class="reader-heading">Примечания и сноски</h2>';
+    notesBodies.forEach((nb) => {
+      html += [...nb.children].map((c) => renderBlock(c, 2)).join('');
+    });
+    html += '</section>';
+  }
 
   return { html, toc };
 }
