@@ -1446,6 +1446,37 @@ tr:nth-child(even) td {
   color: var(--accent);
 }
 
+.book-delete-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(225, 29, 72, 0.22);
+  background: rgba(225, 29, 72, 0.06);
+  color: #e11d48;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s var(--ease-smooth);
+}
+
+.book-delete-btn:hover {
+  background: rgba(225, 29, 72, 0.14);
+  border-color: rgba(225, 29, 72, 0.42);
+}
+
+.book-delete-btn:active {
+  transform: scale(0.96);
+}
+
+.book-delete-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .dl-ring {
   width: 16px;
   height: 16px;

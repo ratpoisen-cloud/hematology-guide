@@ -183,7 +183,7 @@ function performSearch() {
     bookFilterScroll.style.display = (currentTab === 'search' && query.length > 0) ? 'flex' : 'none';
   }
 
-  // Три уровня навигации без поиска: разделы → учебники → главы
+  // Навигация по разделам без поиска: разделы → учебники / мои материалы → статьи
   if (!query) {
     if (navLevel === 'sources') {
       renderSectionTiles();
@@ -191,6 +191,10 @@ function performSearch() {
     }
     if (navLevel === 'books') {
       renderBookTiles();
+      return;
+    }
+    if (navLevel === 'my-materials') {
+      renderMyMaterialsTiles();
       return;
     }
   }
@@ -376,6 +380,7 @@ function pluralForm(n, forms) {
 // Единое правило кнопки возврата: всегда на 1 уровень выше ("← В <родительский раздел>")
 function getBackState() {
   if (calcReturnContext) return { label: '← В калькулятор', target: 'calc' };
+  if (navLevel === 'my-materials') return { label: '← В источники', target: 'sources' };
   if (activeBookFilter === 'emergency' || activeBookFilter === 'my-materials' || activeBookFilter === 'cr-rf') return { label: '← В источники', target: 'sources' };
   if (activeBookFilter && activeBookFilter !== 'all') return { label: '← В учебники', target: 'books' };
   return { label: '← В источники', target: 'sources' };
@@ -386,23 +391,11 @@ function renderSectionTiles() {
   const bookIds = new Set(visualItems.map(a => a.source?.book_id).filter(Boolean));
   const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency' || a.targetSection === 'emergency');
   const crRfItems = catalogData.filter(a => a.source?.book_id === 'cr-rf' || a.targetSection === 'cr-rf');
-  const customItems = catalogData.filter(a => a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials' || (a.isCustom && !a.targetSection));
+  const customItems = catalogData.filter(a => a.isCustom || a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials');
 
   const sections = [];
 
-  // 1. Мои материалы (всегда отображается в источниках)
-  sections.push({
-    nav: 'filter',
-    bookId: 'my-materials',
-    kind: 'Мои материалы',
-    title: 'Мои материалы',
-    countText: customItems.length
-      ? `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`
-      : '0 материалов · Нажмите для добавления',
-    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
-  });
-
-  // 2. Учебники
+  // 1. Учебники
   if (bookIds.size) {
     sections.push({
       nav: 'books',
@@ -413,7 +406,7 @@ function renderSectionTiles() {
     });
   }
 
-  // 3. Неотложные протоколы
+  // 2. Неотложные протоколы
   if (emergencyItems.length) {
     sections.push({
       nav: 'filter',
@@ -425,7 +418,7 @@ function renderSectionTiles() {
     });
   }
 
-  // 4. Клинические рекомендации РФ
+  // 3. Клинические рекомендации РФ
   if (crRfItems.length) {
     sections.push({
       nav: 'filter',
@@ -436,6 +429,18 @@ function renderSectionTiles() {
       icon: SOURCE_ICON_BOOK,
     });
   }
+
+  // 4. Мои материалы (опускаем вниз в конец списка категорий)
+  sections.push({
+    nav: 'my-materials',
+    bookId: 'my-materials',
+    kind: 'Персональный раздел',
+    title: 'Мои материалы',
+    countText: customItems.length
+      ? `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`
+      : '0 материалов · Ваши загруженные книги и документы',
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
+  });
 
   itemCount.textContent = `${sections.length} ${pluralForm(sections.length, ['раздел', 'раздела', 'разделов'])}`;
 
@@ -453,20 +458,108 @@ function renderSectionTiles() {
 
   articlesList.querySelectorAll('.source-tile').forEach(tile => {
     tile.addEventListener('click', () => {
-      if (tile.getAttribute('data-nav') === 'books') {
+      const nav = tile.getAttribute('data-nav');
+      if (nav === 'books') {
         setNavLevel('books');
+      } else if (nav === 'my-materials') {
+        setNavLevel('my-materials');
       } else {
-        const bid = tile.getAttribute('data-book-id');
-        if (bid === 'my-materials' && customItems.length === 0) {
-          const sheet = document.getElementById('customUploadSheet');
-          if (sheet) {
-            renderCustomMaterialsList();
-            sheet.classList.add('open');
-            return;
-          }
-        }
-        setActiveBookFilter(bid);
+        setActiveBookFilter(tile.getAttribute('data-book-id'));
       }
+    });
+  });
+}
+
+// Интерфейс «Мои материалы» в едином стиле учебников
+async function renderMyMaterialsTiles() {
+  const customItems = catalogData.filter(a => a.isCustom || a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials');
+  itemCount.textContent = `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`;
+
+  const toolbarHtml = `
+    <div class="book-chapter-toolbar">
+      <button class="back-tile" id="backToSectionsBtn">← В источники</button>
+      <button type="button" class="materials-upload-pill" id="myMaterialsAddBtn" style="margin-left: auto;">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+        <span>Загрузить</span>
+      </button>
+    </div>
+  `;
+
+  if (!customItems.length) {
+    articlesList.innerHTML = toolbarHtml + `
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
+        <p style="font-size: 0.95rem; font-weight: 500;">В «Моих материалах» пока нет файлов</p>
+        <p style="font-size: 0.8rem; margin-top: 4px;">Загрузите PDF, FB2, Markdown или TXT для чтения без интернета</p>
+        <button type="button" class="btn-primary-action" id="emptyUploadBtn" style="margin-top: 14px; max-width: 220px; display: inline-block;">+ Загрузить материал</button>
+      </div>
+    `;
+    document.getElementById('backToSectionsBtn')?.addEventListener('click', () => setNavLevel('sources'));
+    const openSheet = () => {
+      renderCustomMaterialsList();
+      document.getElementById('customUploadSheet')?.classList.add('open');
+    };
+    document.getElementById('myMaterialsAddBtn')?.addEventListener('click', openSheet);
+    document.getElementById('emptyUploadBtn')?.addEventListener('click', openSheet);
+    return;
+  }
+
+  articlesList.innerHTML = toolbarHtml + customItems.map((item, index) => {
+    const fmtBadge = getFormatBadgeLabel(item.format || 'pdf');
+    const cover = (item.customThumbnail || item.thumbnail)
+      ? `<span class="source-tile-cover"><img src="${item.customThumbnail || item.thumbnail}" alt="Обложка" loading="lazy"></span>`
+      : `<span class="source-tile-icon" style="color: var(--accent); background: rgba(0, 113, 227, 0.08); font-size: 0.72rem; font-weight: 800;">${fmtBadge}</span>`;
+
+    const pages = item.pages || 1;
+    const pagesText = `${pages} ${pluralForm(pages, ['страница', 'страницы', 'страниц'])}`;
+    const sizeText = formatFileSize(item.fileSize || item.size || 0);
+
+    return `
+      <div class="source-tile source-tile--book" data-custom-id="${item.id}" role="button" tabindex="0" style="animation-delay: ${Math.min(index * 40, 200)}ms">
+        ${cover}
+        <span class="source-tile-body">
+          <span class="source-tile-kind">${fmtBadge} · ${escapeHtml(item.category || 'Документ')}</span>
+          <span class="source-tile-title source-tile-title--book">${escapeHtml(item.title)}</span>
+          <span class="source-tile-count">${pagesText} · ${sizeText}</span>
+          <span class="source-tile-actions-row">
+            <button type="button" class="book-delete-btn" data-delete-custom="${item.id}" title="Удалить из справочника">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" aria-hidden="true"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              <span>Удалить</span>
+            </button>
+          </span>
+        </span>
+        <span class="source-tile-arrow" aria-hidden="true">→</span>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('backToSectionsBtn')?.addEventListener('click', () => setNavLevel('sources'));
+  document.getElementById('myMaterialsAddBtn')?.addEventListener('click', () => {
+    renderCustomMaterialsList();
+    document.getElementById('customUploadSheet')?.classList.add('open');
+  });
+
+  articlesList.querySelectorAll('.source-tile[data-custom-id]').forEach(tile => {
+    tile.addEventListener('click', () => {
+      const id = tile.getAttribute('data-custom-id');
+      const item = catalogData.find(a => a.id === id);
+      if (item && reader) {
+        reader.open(item);
+      }
+    });
+  });
+
+  articlesList.querySelectorAll('[data-delete-custom]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-delete-custom');
+      const ok = confirm('Удалить этот документ из локального хранилища?');
+      if (!ok) return;
+      await deleteCustomMaterial(id);
+      catalogData = catalogData.filter(a => a.id !== id);
+      searchEngine.loadData(catalogData);
+      renderBookFilters();
+      renderMyMaterialsTiles();
+      showToast('Документ удален');
     });
   });
 }
@@ -1681,6 +1774,8 @@ async function renderCustomMaterialsList() {
           }
         } else if (navLevel === 'books') {
           renderBookTiles();
+        } else if (navLevel === 'my-materials') {
+          renderMyMaterialsTiles();
         } else {
           renderSectionTiles();
         }
@@ -1808,6 +1903,8 @@ function initCustomMaterialsModule() {
       if (currentTab === 'search') {
         if (navLevel === 'books') {
           renderBookTiles();
+        } else if (navLevel === 'my-materials') {
+          renderMyMaterialsTiles();
         } else if (activeBookFilter === 'my-materials' || activeBookFilter === rec.section) {
           performSearch();
         } else {
