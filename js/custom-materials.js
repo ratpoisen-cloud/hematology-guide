@@ -30,6 +30,32 @@ export function formatFileSize(bytes) {
   return `${kb} КБ`;
 }
 
+// Декодирование XML с поддержкой кодировок (windows-1251, utf-8, koi8-r)
+export async function readXmlTextWithEncoding(blobOrFile) {
+  const buf = await blobOrFile.arrayBuffer();
+  const headerBytes = new Uint8Array(buf.slice(0, 250));
+  const headerAscii = String.fromCharCode(...headerBytes);
+  const encMatch = headerAscii.match(/<\?xml[^>]+encoding=["']([^"']+)["']/i);
+  let encoding = 'utf-8';
+  if (encMatch && encMatch[1]) {
+    const declared = encMatch[1].toLowerCase().trim();
+    if (declared.includes('1251') || declared === 'windows-1251' || declared === 'cp1251') {
+      encoding = 'windows-1251';
+    } else if (declared.includes('koi8')) {
+      encoding = 'koi8-r';
+    } else if (declared.includes('iso-8859-5')) {
+      encoding = 'iso-8859-5';
+    }
+  }
+  try {
+    const decoder = new TextDecoder(encoding);
+    return decoder.decode(buf);
+  } catch (e) {
+    const fallback = new TextDecoder('utf-8');
+    return fallback.decode(buf);
+  }
+}
+
 // Определение формата файла по имени и MIME-типу
 export function detectFileFormat(file) {
   const name = (file?.name || '').toLowerCase();
@@ -37,7 +63,7 @@ export function detectFileFormat(file) {
   if (name.endsWith('.fb2') || file?.type.includes('fictionbook') || file?.type.includes('xml')) return 'fb2';
   if (name.endsWith('.md') || name.endsWith('.markdown')) return 'markdown';
   if (name.endsWith('.txt') || file?.type === 'text/plain') return 'txt';
-  return 'pdf';
+  return null;
 }
 
 export function getFormatBadgeLabel(format) {
@@ -51,12 +77,16 @@ export function getFormatBadgeLabel(format) {
 // Определение метаданных в зависимости от формата
 export async function inspectCustomFile(file) {
   const format = detectFileFormat(file);
+  if (!format) {
+    throw new Error('Неподдерживаемый формат файла. Поддерживаются PDF, FB2, Markdown (.md) и TXT.');
+  }
 
   if (format === 'pdf') {
+    let pdf = null;
     try {
       const pdfjsLib = await getPdfJs();
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const numPages = pdf.numPages || 1;
 
       let thumbnail = null;
@@ -79,12 +109,16 @@ export async function inspectCustomFile(file) {
     } catch (err) {
       console.error('PDF inspection failed:', err);
       return { format: 'pdf', numPages: 1, thumbnail: null, title: file.name.replace(/\.[^/.]+$/, '') };
+    } finally {
+      if (pdf) {
+        try { pdf.destroy(); } catch (_) {}
+      }
     }
   }
 
   if (format === 'fb2') {
     try {
-      const text = await file.text();
+      const text = await readXmlTextWithEncoding(file);
       const parser = new DOMParser();
       const doc = parser.parseFromString(text, 'application/xml');
 
@@ -221,7 +255,8 @@ export function customMaterialToCatalogItem(record) {
       file: '',
     };
   } else {
-    item.content_markdown = record.snippet || '';
+    item.snippet = record.snippet || '';
+    item.content_markdown = ''; // Загружается целиком из blob при открытии в ридере
   }
 
   return item;

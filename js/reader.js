@@ -14,6 +14,7 @@ import {
   getCustomMaterial,
   saveCustomMaterial,
 } from './storage.js';
+import { readXmlTextWithEncoding } from './custom-materials.js';
 
 const NOTE_COLORS = [
   { id: 'blue', label: 'Важно', hex: '#0071e3' },
@@ -321,7 +322,7 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     if (!noteBadge) return;
     const pageNum = currentPageNum();
     const count = pageNum != null
-      ? articleNotes.filter((n) => n.page === pageNum).length
+      ? articleNotes.filter((n) => n.page === pageNum || n.page == null).length
       : articleNotes.length;
     noteBadge.textContent = count > 0 ? String(count) : '';
     noteBadge.style.display = count > 0 ? 'inline-flex' : 'none';
@@ -773,6 +774,21 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       }
     });
 
+    viewportEl.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href], a[l\\:href], .doc-link');
+      if (link) {
+        const href = link.getAttribute('data-internal-id') || link.getAttribute('href') || link.getAttribute('l:href') || '';
+        if (href.startsWith('#')) {
+          e.preventDefault();
+          const targetId = href.replace(/^#/, '');
+          const targetEl = document.getElementById(targetId);
+          if (targetEl) {
+            jumpTextToElement(targetEl);
+          }
+        }
+      }
+    });
+
     viewportEl.addEventListener('pointercancel', () => {
       textTouchStart = null;
       textTouchPointerId = null;
@@ -801,11 +817,12 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
         if (currentArticle.isCustom && currentArticle.customId) {
           const rec = await getCustomMaterial(currentArticle.customId);
           if (!rec || !rec.blob) throw new Error('Файл не найден в локальном хранилище');
-          xmlText = await rec.blob.text();
+          xmlText = await readXmlTextWithEncoding(rec.blob);
         } else {
           const resp = await fetch(currentArticle.fb2.file);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          xmlText = await resp.text();
+          const blob = await resp.blob();
+          xmlText = await readXmlTextWithEncoding(blob);
         }
         const parsed = parseFb2Xml(xmlText);
         bodyHtml = parsed.html;
@@ -814,7 +831,7 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
         bodyHtml = `<p class="reader-error">Не удалось загрузить FB2: ${escapeHtml(err.message)}</p>`;
       }
     } else {
-      if (currentArticle.isCustom && currentArticle.customId && !currentArticle.content_markdown) {
+      if (currentArticle.isCustom && currentArticle.customId) {
         try {
           const rec = await getCustomMaterial(currentArticle.customId);
           if (rec && rec.blob) {
@@ -841,6 +858,8 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       scrollObserver.disconnect();
       scrollObserver = null;
     }
+    stageEl.onclick = null;
+    stageEl.onscroll = null;
     stageEl.className = `reader-stage reader-stage--text-swipe reader-theme-${settings.theme}`;
     stageEl.style.setProperty('--reader-font-size', `${settings.fontSize}px`);
     stageEl.scrollTop = 0;
@@ -1047,18 +1066,19 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     if (!notesListEl) return;
     const pNum = currentPageNum();
     const filtered = pNum != null
-      ? articleNotes.filter((n) => n.page === pNum)
+      ? articleNotes.filter((n) => n.page === pNum || n.page == null)
       : articleNotes;
 
     if (filtered.length === 0) {
-      notesListEl.innerHTML = `<div class="reader-notes-empty">На этой странице пока нет заметок.</div>`;
+      notesListEl.innerHTML = `<div class="reader-notes-empty">Заметок пока нет.</div>`;
     } else {
       notesListEl.innerHTML = filtered.map((n) => {
         const col = NOTE_COLORS.find((c) => c.id === n.color) || NOTE_COLORS[0];
+        const pageBadge = n.page != null ? `стр. ${n.page}` : 'Общая заметка';
         return `
           <div class="reader-note-card" style="--note-color: ${col.hex}">
             <div class="reader-note-card-head">
-              <span class="reader-note-tag">${col.label}</span>
+              <span class="reader-note-tag">${col.label} · ${pageBadge}</span>
               <span class="reader-note-date">${new Date(n.updatedAt || n.createdAt).toLocaleDateString('ru-RU')}</span>
             </div>
             <div class="reader-note-text">${escapeHtml(n.text)}</div>
@@ -1277,9 +1297,14 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       URL.revokeObjectURL(activeCustomBlobUrl);
       activeCustomBlobUrl = null;
     }
-    pdfDoc = null;
+    if (pdfDoc) {
+      try { pdfDoc.destroy(); } catch (_) {}
+      pdfDoc = null;
+    }
     pdfRenderCache.clear();
     stageEl.innerHTML = '';
+    stageEl.onclick = null;
+    stageEl.onscroll = null;
     currentArticle = null;
     if (onClose) onClose();
   }
@@ -1311,13 +1336,11 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   scrubber?.addEventListener('input', (e) => {
     const idx = Number(e.target.value);
     if (format === 'images' || format === 'pdf') {
-      currentIndex = idx;
       if (pageLabel) {
         const pNum = pages[idx]?.pageNum ?? (idx + 1);
         pageLabel.textContent = `стр. ${pNum} · ${idx + 1} / ${pages.length}`;
       }
     } else if (settings.viewMode === 'swipe') {
-      textCurrentPage = idx;
       if (pageLabel) {
         pageLabel.textContent = totalTextPages > 0
           ? `стр. ${idx + 1} · ${idx + 1} / ${totalTextPages}`

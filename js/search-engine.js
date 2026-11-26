@@ -86,6 +86,7 @@ export class HematologySearchEngine {
       if (item.quick_facts) addTokens(item.quick_facts.join(' '), 4, idx);
       if (item.category) addTokens(item.category, 3, idx);
       if (item.content_markdown) addTokens(item.content_markdown, 1, idx);
+      if (item.snippet) addTokens(item.snippet, 3, idx);
       if (item.search_text) addTokens(item.search_text, 4, idx);
     });
   }

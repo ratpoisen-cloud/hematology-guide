@@ -51,14 +51,20 @@ async function runTx(storeName, mode, fn) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
-    const req = fn(store);
-    if (req && typeof req.onsuccess !== 'undefined') {
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    } else {
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
+    let result;
+    try {
+      const req = fn(store);
+      if (req && typeof req.onsuccess !== 'undefined') {
+        req.onsuccess = () => { result = req.result; };
+        req.onerror = () => reject(req.error);
+      }
+    } catch (err) {
+      reject(err);
+      return;
     }
+    tx.oncomplete = () => resolve(result !== undefined ? result : true);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
   });
 }
 
@@ -148,6 +154,8 @@ export async function saveProgress(key, data) {
   const record = {
     key,
     page: data.page != null ? Number(data.page) : null,
+    textPage: data.textPage != null ? Number(data.textPage) : null,
+    totalTextPages: data.totalTextPages != null ? Number(data.totalTextPages) : null,
     scrollRatio: data.scrollRatio != null ? Number(data.scrollRatio) : 0,
     total: data.total != null ? Number(data.total) : null,
     updatedAt: Date.now(),

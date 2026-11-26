@@ -241,23 +241,33 @@ async function init() {
   }
 }
 
-// Markdown formatting helper with link support
-function formatInlineMarkdown(text) {
-  if (!text) return '';
-  let res = text;
-  // Markdown links: [Title](#id) or [Title](url)
-  res = res.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="doc-link" data-internal-id="$2">$1</a>');
-  // Bold & Italic & Code
-  res = res.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  res = res.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  res = res.replace(/`([^`]+)`/g, '<code>$1</code>');
-  return res;
-}
-
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+function sanitizeHref(url) {
+  const clean = String(url || '').trim();
+  if (/^(https?:|\/|#|mailto:)/i.test(clean)) return clean;
+  return '#';
+}
+
+// Markdown formatting helper with link support & XSS prevention
+function formatInlineMarkdown(text) {
+  if (!text) return '';
+  // 1. First escape raw HTML to stop any inline tags (<script>, <img onerror=...>)
+  let res = escapeHtml(text);
+  // 2. Markdown links: [Title](#id) or [Title](url) - sanitize href against javascript:
+  res = res.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+    const safe = sanitizeHref(href);
+    return `<a href="${escapeHtml(safe)}" class="doc-link" data-internal-id="${escapeHtml(safe)}">${label}</a>`;
+  });
+  // 3. Bold & Italic & Code
+  res = res.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  res = res.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  res = res.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return res;
 }
 
 // Robust Line-by-Line Markdown Parser (tables, images, links, blockquotes)
@@ -305,8 +315,8 @@ function parseMarkdown(md) {
     // Изображения: ![alt](url)
     const imgMatch = line.match(/^!\[(.*?)\]\((.*?)\)$/);
     if (imgMatch) {
-      const alt = imgMatch[1];
-      const src = imgMatch[2];
+      const alt = escapeHtml(imgMatch[1]);
+      const src = escapeHtml(sanitizeHref(imgMatch[2]));
       const pageMatch = src.match(/p(\d{3})\.webp/);
       const pageAttr = pageMatch ? ` data-page="${parseInt(pageMatch[1], 10)}"` : '';
       output.push(`
@@ -391,7 +401,7 @@ function renderSectionTiles() {
   const bookIds = new Set(visualItems.map(a => a.source?.book_id).filter(Boolean));
   const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency' || a.targetSection === 'emergency');
   const crRfItems = catalogData.filter(a => a.source?.book_id === 'cr-rf' || a.targetSection === 'cr-rf');
-  const customItems = catalogData.filter(a => a.isCustom || a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials');
+  const customItems = catalogData.filter(a => a.targetSection === 'my-materials' || (a.isCustom && (!a.targetSection || a.targetSection === 'my-materials')));
 
   const sections = [];
 
@@ -472,7 +482,7 @@ function renderSectionTiles() {
 
 // Интерфейс «Мои материалы» в едином стиле учебников
 async function renderMyMaterialsTiles() {
-  const customItems = catalogData.filter(a => a.isCustom || a.source?.book_id === 'my-materials' || a.targetSection === 'my-materials');
+  const customItems = catalogData.filter(a => a.targetSection === 'my-materials' || (a.isCustom && (!a.targetSection || a.targetSection === 'my-materials')));
   itemCount.textContent = `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`;
 
   const toolbarHtml = `
@@ -1826,6 +1836,10 @@ function initCustomMaterialsModule() {
     }
     pendingUploadFile = file;
     const format = detectFileFormat(file);
+    if (!format) {
+      alert('Пожалуйста, выберите файл в поддерживаемом формате: PDF, FB2, Markdown (.md) или TXT');
+      return;
+    }
     const fmtBadge = getFormatBadgeLabel(format);
 
     let displayTitle = file.name.replace(/\.[^/.]+$/, '');
