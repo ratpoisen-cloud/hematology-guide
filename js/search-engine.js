@@ -112,8 +112,13 @@ export class HematologySearchEngine {
         if (categoryFilter !== 'toc' && item.type !== categoryFilter) return false;
       }
       if (bookFilter !== 'all') {
-        const itemBookId = item.source?.book_id || '';
-        if (itemBookId !== bookFilter) return false;
+        if (bookFilter === 'my-materials') {
+          if (!item.isCustom && item.source?.book_id !== 'my-materials' && item.targetSection !== 'my-materials') return false;
+        } else {
+          const itemBookId = item.source?.book_id || '';
+          const itemTarget = item.targetSection || '';
+          if (itemBookId !== bookFilter && itemTarget !== bookFilter) return false;
+        }
       }
       return true;
     };

@@ -130,6 +130,12 @@ function renderBookFilters() {
     if (bid) {
       counts[bid] = (counts[bid] || 0) + 1;
     }
+    if (item.targetSection && item.targetSection !== bid) {
+      counts[item.targetSection] = (counts[item.targetSection] || 0) + 1;
+    }
+    if (item.isCustom) {
+      counts['my-materials'] = (counts['my-materials'] || 0) + 1;
+    }
   });
 
   const availableBooks = BOOK_ORDER.filter(b => (counts[b.id] || 0) > 0);
@@ -401,7 +407,7 @@ function renderSectionTiles() {
   const bookIds = new Set(visualItems.map(a => a.source?.book_id).filter(Boolean));
   const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency' || a.targetSection === 'emergency');
   const crRfItems = catalogData.filter(a => a.source?.book_id === 'cr-rf' || a.targetSection === 'cr-rf');
-  const customItems = catalogData.filter(a => a.targetSection === 'my-materials' || (a.isCustom && (!a.targetSection || a.targetSection === 'my-materials')));
+  const customItems = catalogData.filter(a => a.isCustom);
 
   const sections = [];
 
@@ -482,7 +488,7 @@ function renderSectionTiles() {
 
 // Интерфейс «Мои материалы» в едином стиле учебников
 async function renderMyMaterialsTiles() {
-  const customItems = catalogData.filter(a => a.targetSection === 'my-materials' || (a.isCustom && (!a.targetSection || a.targetSection === 'my-materials')));
+  const customItems = catalogData.filter(a => a.isCustom);
   itemCount.textContent = `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`;
 
   const toolbarHtml = `
