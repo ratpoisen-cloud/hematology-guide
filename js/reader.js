@@ -875,6 +875,8 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     if (bottomControlsPage) bottomControlsPage.style.display = isPageMode ? 'flex' : 'none';
     if (bottomControlsText) bottomControlsText.style.display = isPageMode ? 'none' : 'flex';
     if (typoBar) typoBar.style.display = isPageMode ? 'none' : 'flex';
+    if (modeToggleBtn) modeToggleBtn.style.display = isPageMode ? 'inline-flex' : 'none';
+    if (pageLabel) pageLabel.style.display = isPageMode ? 'inline' : 'none';
 
     if (format === 'images') {
       pages = extractWebpPages(article);
@@ -1001,6 +1003,7 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   scrubber?.addEventListener('change', (e) => goToIndex(Number(e.target.value)));
 
   modeToggleBtn?.addEventListener('click', async () => {
+    if (format !== 'images' && format !== 'pdf') return;
     const nextMode = settings.viewMode === 'swipe' ? 'scroll' : 'swipe';
     settings = await saveReaderSettings({ viewMode: nextMode });
     if (nextMode === 'swipe') await renderSwipeStage();
