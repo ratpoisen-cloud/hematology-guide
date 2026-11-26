@@ -10,6 +10,14 @@ import {
   formatBytes,
   onOfflineStateChange,
 } from './offline-books.js';
+import {
+  importCustomPdf,
+  loadCustomCatalogItems,
+  deleteCustomMaterial,
+  getAllCustomMaterials,
+  formatFileSize,
+  customMaterialToCatalogItem,
+} from './custom-materials.js';
 
 const searchEngine = new HematologySearchEngine();
 let currentTab = 'home';
@@ -97,6 +105,7 @@ if ('serviceWorker' in navigator) {
 // Порядок и человекочитаемые подписи источников для горизонтального фильтра
 const BOOK_ORDER = [
   { id: 'all', short: 'Все разделы' },
+  { id: 'my-materials', short: 'Мои материалы' },
   { id: 'cr-rf', short: 'Клинрекомендации РФ' },
   { id: 'emergency', short: 'Неотложные протоколы' },
   { id: 'tables-handbook', short: 'Справочник в таблицах' },
@@ -203,9 +212,18 @@ async function init() {
   try {
     const res = await fetch('./data/catalog.json');
     catalogData = await res.json();
+    try {
+      const customItems = await loadCustomCatalogItems();
+      if (customItems && customItems.length > 0) {
+        catalogData = [...customItems, ...catalogData];
+      }
+    } catch (e) {
+      console.warn('Custom materials error:', e);
+    }
     searchEngine.loadData(catalogData);
     renderBookFilters();
     renderHomeWidgets();
+    initCustomMaterialsModule();
     navigateToTab('home');
     if (homeView) homeView.classList.add('home-animate');
   } catch (err) {
@@ -351,7 +369,7 @@ function pluralForm(n, forms) {
 // Единое правило кнопки возврата: всегда на 1 уровень выше ("← В <родительский раздел>")
 function getBackState() {
   if (calcReturnContext) return { label: '← В калькулятор', target: 'calc' };
-  if (activeBookFilter === 'emergency') return { label: '← В источники', target: 'sources' };
+  if (activeBookFilter === 'emergency' || activeBookFilter === 'my-materials') return { label: '← В источники', target: 'sources' };
   if (activeBookFilter && activeBookFilter !== 'all') return { label: '← В учебники', target: 'books' };
   return { label: '← В источники', target: 'sources' };
 }
@@ -360,8 +378,19 @@ function renderSectionTiles() {
   const visualItems = catalogData.filter(a => a.type === 'visual');
   const bookIds = new Set(visualItems.map(a => a.source?.book_id));
   const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency');
+  const customItems = catalogData.filter(a => a.source?.book_id === 'my-materials');
 
   const sections = [];
+  if (customItems.length) {
+    sections.push({
+      nav: 'filter',
+      bookId: 'my-materials',
+      kind: 'Мои материалы',
+      title: 'Мои материалы (PDF)',
+      countText: `${customItems.length} ${pluralForm(customItems.length, ['документ', 'документа', 'документов'])}`,
+      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
+    });
+  }
   if (bookIds.size) {
     sections.push({
       nav: 'books',
@@ -1502,5 +1531,195 @@ window.calculateIMPEDE = function() {
     riskElem.innerHTML = '<span style="color:#e11d48; font-weight:600;">≥ 8 баллов: Высокий риск ВТЭО (>15%)!</span> Обязательна антикоагулянтная тромбопрофилактика (НМГ или ПОАК) на весь период активной терапии иммуномодуляторами/дексаметазоном.';
   }
 };
+
+// ==========================================================================
+// Toast Notification Helper
+// ==========================================================================
+let toastTimer = null;
+function showToast(text, duration = 2800) {
+  const el = document.getElementById('toastPopup');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+  }, duration);
+}
+
+// ==========================================================================
+// Custom Materials Module (Upload & Manage PDFs)
+// ==========================================================================
+let customMaterialsInitialized = false;
+let pendingUploadFile = null;
+
+async function renderCustomMaterialsList() {
+  const container = document.getElementById('customMaterialsList');
+  if (!container) return;
+  const list = await getAllCustomMaterials();
+  if (!list.length) {
+    container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 16px 0; font-size: 0.85rem;">Пока нет загруженных материалов</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map((item) => `
+    <div class="custom-doc-item">
+      ${item.thumbnail
+        ? `<img class="custom-doc-thumb" src="${item.thumbnail}" alt="">`
+        : `<div class="custom-doc-thumb">PDF</div>`
+      }
+      <div class="custom-doc-meta">
+        <div class="custom-doc-title">${escapeHtml(item.title)}</div>
+        <div class="custom-doc-sub">${escapeHtml(item.category)} · ${formatFileSize(item.size)} · ${item.pages || 1} стр.</div>
+      </div>
+      <button type="button" class="custom-doc-delete-btn" data-delete-custom="${item.id}" title="Удалить документ">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-delete-custom]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-delete-custom');
+      const ok = confirm('Удалить этот документ из локального хранилища?');
+      if (!ok) return;
+      await deleteCustomMaterial(id);
+      catalogData = catalogData.filter((a) => a.id !== id);
+      searchEngine.loadData(catalogData);
+      renderBookFilters();
+      if (currentTab === 'search') {
+        if (activeBookFilter === 'my-materials') {
+          const remaining = catalogData.filter((a) => a.source?.book_id === 'my-materials');
+          if (remaining.length === 0) {
+            setActiveBookFilter('all');
+          } else {
+            performSearch();
+          }
+        } else {
+          renderSectionTiles();
+        }
+      }
+      renderCustomMaterialsList();
+      showToast('Документ удален');
+    });
+  });
+}
+
+function initCustomMaterialsModule() {
+  if (customMaterialsInitialized) return;
+  customMaterialsInitialized = true;
+
+  const uploadSheet = document.getElementById('customUploadSheet');
+  const uploadClose = document.getElementById('customUploadClose');
+  const dropZone = document.getElementById('customDropZone');
+  const fileInput = document.getElementById('customFileInput');
+  const chooseFileBtn = document.getElementById('customChooseFileBtn');
+  const uploadForm = document.getElementById('customUploadForm');
+  const titleInput = document.getElementById('customTitleInput');
+  const categorySelect = document.getElementById('customCategorySelect');
+  const submitBtn = document.getElementById('customSubmitUploadBtn');
+  const cancelBtn = document.getElementById('customCancelUploadBtn');
+  const statusEl = document.getElementById('customUploadStatus');
+
+  const openSheet = () => {
+    renderCustomMaterialsList();
+    uploadSheet?.classList.add('open');
+  };
+
+  document.getElementById('openUploadSheetBtn')?.addEventListener('click', openSheet);
+  document.getElementById('homeUploadMaterialBtn')?.addEventListener('click', openSheet);
+  uploadClose?.addEventListener('click', () => uploadSheet?.classList.remove('open'));
+
+  const handleSelectedFile = (file) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Пожалуйста, выберите файл в формате PDF');
+      return;
+    }
+    pendingUploadFile = file;
+    if (titleInput) titleInput.value = file.name.replace(/\.[^/.]+$/, '');
+    if (dropZone) dropZone.style.display = 'none';
+    if (uploadForm) uploadForm.style.display = 'block';
+    if (statusEl) statusEl.textContent = `Выбран файл: ${file.name} (${formatFileSize(file.size)})`;
+  };
+
+  chooseFileBtn?.addEventListener('click', () => fileInput?.click());
+  dropZone?.addEventListener('click', (e) => {
+    if (e.target !== chooseFileBtn) fileInput?.click();
+  });
+
+  fileInput?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleSelectedFile(e.target.files[0]);
+    }
+  });
+
+  if (dropZone) {
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer?.files && e.dataTransfer.files[0]) {
+        handleSelectedFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  cancelBtn?.addEventListener('click', () => {
+    pendingUploadFile = null;
+    if (fileInput) fileInput.value = '';
+    if (uploadForm) uploadForm.style.display = 'none';
+    if (dropZone) dropZone.style.display = 'flex';
+    if (statusEl) statusEl.textContent = '';
+  });
+
+  uploadForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!pendingUploadFile) return;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Обработка и сохранение…';
+    }
+    if (statusEl) statusEl.textContent = 'Генерация страниц и запись в IndexedDB…';
+
+    try {
+      const rec = await importCustomPdf({
+        file: pendingUploadFile,
+        title: titleInput?.value,
+        category: categorySelect?.value,
+      });
+
+      const catalogItem = customMaterialToCatalogItem(rec);
+      catalogData.unshift(catalogItem);
+      searchEngine.loadData(catalogData);
+      renderBookFilters();
+      if (currentTab === 'search') renderSectionTiles();
+      await renderCustomMaterialsList();
+
+      showToast(`✓ Документ «${rec.title}» добавлен!`);
+
+      // Reset
+      pendingUploadFile = null;
+      if (fileInput) fileInput.value = '';
+      if (uploadForm) uploadForm.style.display = 'none';
+      if (dropZone) dropZone.style.display = 'flex';
+      if (statusEl) statusEl.textContent = '';
+    } catch (err) {
+      if (statusEl) statusEl.textContent = 'Ошибка: ' + err.message;
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Добавить в справочник';
+      }
+    }
+  });
+}
 
 init();

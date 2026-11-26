@@ -3,7 +3,7 @@
 // ==========================================================================
 
 const DB_NAME = 'gem_ref_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SETTINGS_KEY = 'reader_settings';
 const FALLBACK_NOTES_KEY = 'gem_notes_fallback';
 const FALLBACK_PROGRESS_KEY = 'gem_progress_fallback';
@@ -34,6 +34,10 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('custom_materials')) {
+        const customStore = db.createObjectStore('custom_materials', { keyPath: 'id' });
+        customStore.createIndex('addedAt', 'addedAt', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -212,3 +216,42 @@ export async function saveReaderSettings(partial) {
   } catch (_) { /* ignore */ }
   return next;
 }
+
+// --- Custom User Materials (Uploaded PDFs) ---
+export async function saveCustomMaterial(material) {
+  try {
+    await runTx('custom_materials', 'readwrite', (s) => s.put(material));
+    return material;
+  } catch (err) {
+    console.error('Failed to save custom material:', err);
+    throw err;
+  }
+}
+
+export async function getCustomMaterial(id) {
+  try {
+    return (await runTx('custom_materials', 'readonly', (s) => s.get(id))) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function getAllCustomMaterials() {
+  try {
+    const items = await runTx('custom_materials', 'readonly', (s) => s.getAll());
+    return (items || []).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  } catch (_) {
+    return [];
+  }
+}
+
+export async function deleteCustomMaterial(id) {
+  try {
+    await runTx('custom_materials', 'readwrite', (s) => s.delete(id));
+    return true;
+  } catch (err) {
+    console.error('Failed to delete custom material:', err);
+    return false;
+  }
+}
+

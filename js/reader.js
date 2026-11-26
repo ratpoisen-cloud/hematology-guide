@@ -11,6 +11,7 @@ import {
   saveProgress,
   getReaderSettings,
   saveReaderSettings,
+  getCustomMaterial,
 } from './storage.js';
 
 const NOTE_COLORS = [
@@ -210,10 +211,11 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
 
   let scrollProgressTimer = null;
   let wheelFlipAt = 0;
+  let activeCustomBlobUrl = null;
 
   function detectFormat(article) {
     if (article?.fb2?.file || article?.type === 'fb2') return 'fb2';
-    if (article?.pdf?.file) return 'pdf';
+    if (article?.pdf?.file || article?.pdf?.isCustom || article?.isCustom) return 'pdf';
     if (article?.type === 'visual' && extractWebpPages(article).length > 0) return 'images';
     return 'markdown';
   }
@@ -891,7 +893,18 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       stageEl.innerHTML = `<div class="reader-loader">Инициализация PDF-ридера…</div>`;
       try {
         const pdfjsLib = await loadPdfJs();
-        pdfDoc = await pdfjsLib.getDocument(pdf.file).promise;
+        let pdfSource = pdf.file;
+        if (pdf.isCustom && pdf.customId) {
+          const rec = await getCustomMaterial(pdf.customId);
+          if (rec && rec.blob) {
+            if (activeCustomBlobUrl) {
+              URL.revokeObjectURL(activeCustomBlobUrl);
+            }
+            activeCustomBlobUrl = URL.createObjectURL(rec.blob);
+            pdfSource = activeCustomBlobUrl;
+          }
+        }
+        pdfDoc = await pdfjsLib.getDocument(pdfSource).promise;
         if (settings.viewMode === 'swipe') await renderSwipeStage();
         else renderScrollStage();
       } catch (err) {
@@ -910,6 +923,10 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     if (scrollObserver) {
       scrollObserver.disconnect();
       scrollObserver = null;
+    }
+    if (activeCustomBlobUrl) {
+      URL.revokeObjectURL(activeCustomBlobUrl);
+      activeCustomBlobUrl = null;
     }
     pdfDoc = null;
     pdfRenderCache.clear();

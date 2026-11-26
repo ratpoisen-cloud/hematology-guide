@@ -2814,3 +2814,206 @@ body.on-home {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-3px); }
 }
+
+/* ==========================================================================
+   Custom Materials (PDF Upload)
+   ========================================================================== */
+
+.btn-primary-action {
+  appearance: none;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 12px 18px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+  transition: all 0.15s ease;
+  min-height: 48px;
+}
+
+.btn-primary-action:active {
+  transform: scale(0.98);
+  filter: brightness(0.92);
+}
+
+.materials-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.materials-upload-pill {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+}
+
+.materials-upload-pill:active {
+  transform: scale(0.96);
+}
+
+.materials-upload-pill svg {
+  color: var(--accent);
+}
+
+.custom-upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 16px;
+  text-align: center;
+  background: var(--bg-input);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.custom-upload-zone.dragover {
+  border-color: var(--accent);
+  background: rgba(2, 132, 199, 0.08);
+}
+
+.upload-zone-text {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.upload-zone-hint {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+.custom-materials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.custom-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+
+.custom-doc-thumb {
+  width: 36px;
+  height: 48px;
+  border-radius: 4px;
+  background: var(--border);
+  object-fit: cover;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.custom-doc-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-doc-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-doc-sub {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.custom-doc-delete-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.custom-doc-delete-btn:hover {
+  color: #e11d48;
+  background: rgba(225, 29, 72, 0.08);
+}
+
+/* ==========================================================================
+   Toast Notification Popup
+   ========================================================================== */
+
+.toast-popup {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100px);
+  z-index: 1000;
+  background: rgba(20, 22, 28, 0.92);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: none;
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.toast-popup.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+[data-theme="dark"] .toast-popup {
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f1014;
+}
+
