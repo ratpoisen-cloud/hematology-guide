@@ -192,6 +192,14 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   let editingNoteId = null;
   let tocItems = [];
 
+  // Text swipe state
+  let textCurrentPage = 0;
+  let totalTextPages = 1;
+  let cachedTextBodyHtml = '';
+  let textResizeObserver = null;
+  let textTouchStart = null;
+  let textTouchPointerId = null;
+
   // PDF state
   let pdfDoc = null;
   const pdfRenderCache = new Map(); // pageNum -> { dataUrl, width, height }
@@ -294,6 +302,9 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   function currentPageNum() {
     if (format === 'images' || format === 'pdf') {
       return pages[currentIndex]?.pageNum ?? (currentIndex + 1);
+    }
+    if (settings.viewMode === 'swipe') {
+      return textCurrentPage + 1;
     }
     return null;
   }
@@ -612,10 +623,174 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     updatePageChrome();
   }
 
-  async function renderTextStage(targetPageOrAnchor) {
-    stageEl.className = `reader-stage reader-stage--text reader-theme-${settings.theme}`;
-    stageEl.style.setProperty('--reader-font-size', `${settings.fontSize}px`);
+  function updateTextSwipeChrome() {
+    if (bottomControlsPage) bottomControlsPage.style.display = 'flex';
+    if (bottomControlsText) bottomControlsText.style.display = 'none';
+    if (typoBar) typoBar.style.display = 'flex';
+    if (pageLabel) {
+      pageLabel.style.display = 'inline';
+      pageLabel.textContent = totalTextPages > 0
+        ? `стр. ${textCurrentPage + 1} · ${textCurrentPage + 1} / ${totalTextPages}`
+        : '';
+    }
+    if (subtitleEl) {
+      const bookShort = currentArticle?.source?.book_short || currentArticle?.source?.book || '';
+      subtitleEl.textContent = totalTextPages > 0 ? `${bookShort} · стр. ${textCurrentPage + 1}` : bookShort;
+    }
+    if (prevBtn) prevBtn.disabled = textCurrentPage <= 0;
+    if (nextBtn) nextBtn.disabled = textCurrentPage >= totalTextPages - 1;
+    if (scrubber) {
+      scrubber.min = '0';
+      scrubber.max = String(Math.max(0, totalTextPages - 1));
+      scrubber.value = String(textCurrentPage);
+    }
+    if (modeToggleBtn) {
+      modeToggleBtn.style.display = 'inline-flex';
+      modeToggleBtn.textContent = 'Свайп';
+    }
+    updateNoteBadge();
+  }
 
+  function updateTextScrollChrome() {
+    if (bottomControlsPage) bottomControlsPage.style.display = 'none';
+    if (bottomControlsText) bottomControlsText.style.display = 'flex';
+    if (typoBar) typoBar.style.display = 'flex';
+    if (pageLabel) pageLabel.style.display = 'none';
+    if (subtitleEl) {
+      subtitleEl.textContent = currentArticle?.source?.book_short || currentArticle?.source?.book || '';
+    }
+    if (modeToggleBtn) {
+      modeToggleBtn.style.display = 'inline-flex';
+      modeToggleBtn.textContent = 'Лента';
+    }
+    updateNoteBadge();
+  }
+
+  function persistTextProgress() {
+    if (!currentArticle) return;
+    const ratio = totalTextPages > 1 ? (textCurrentPage / (totalTextPages - 1)) : 0;
+    saveProgress(currentArticle.id, {
+      textPage: textCurrentPage,
+      totalTextPages,
+      scrollRatio: ratio,
+    });
+  }
+
+  function goToTextPage(pageIndex, animate = true) {
+    const clamped = Math.max(0, Math.min(totalTextPages - 1, pageIndex));
+    textCurrentPage = clamped;
+    const viewportEl = document.getElementById('readerTextViewport');
+    const trackEl = document.getElementById('readerTextTrack');
+    if (viewportEl && trackEl) {
+      const colWidth = Math.max(260, viewportEl.clientWidth - 48);
+      const colGap = 48;
+      const step = colWidth + colGap;
+      if (!animate) trackEl.style.transition = 'none';
+      trackEl.style.transform = `translate3d(${-clamped * step}px, 0, 0)`;
+      if (!animate) {
+        trackEl.offsetHeight; // force reflow
+        trackEl.style.transition = 'transform 0.28s cubic-bezier(0.2, 0, 0, 1)';
+      }
+    }
+    updateTextSwipeChrome();
+    persistTextProgress();
+  }
+
+  function recalculateTextSwipePages(keepRelative = true) {
+    const viewportEl = document.getElementById('readerTextViewport');
+    const trackEl = document.getElementById('readerTextTrack');
+    if (!viewportEl || !trackEl) return;
+
+    const prevTotal = totalTextPages;
+    const prevRatio = prevTotal > 1 ? (textCurrentPage / (prevTotal - 1)) : 0;
+
+    const colWidth = Math.max(260, viewportEl.clientWidth - 48);
+    const colHeight = Math.max(200, viewportEl.clientHeight - 44);
+    const colGap = 48;
+
+    trackEl.style.columnWidth = `${colWidth}px`;
+    trackEl.style.columnGap = `${colGap}px`;
+    trackEl.style.height = `${colHeight}px`;
+
+    const step = colWidth + colGap;
+    totalTextPages = Math.max(1, Math.round((trackEl.scrollWidth + colGap) / step));
+
+    if (keepRelative && prevTotal > 1) {
+      textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, Math.round(prevRatio * (totalTextPages - 1))));
+    } else {
+      textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, textCurrentPage));
+    }
+
+    goToTextPage(textCurrentPage, false);
+  }
+
+  function jumpTextToElement(target) {
+    if (!target) return;
+    if (settings.viewMode === 'swipe') {
+      const viewportEl = document.getElementById('readerTextViewport');
+      if (viewportEl) {
+        const colWidth = Math.max(260, viewportEl.clientWidth - 48);
+        const colGap = 48;
+        const step = colWidth + colGap;
+        const targetPage = Math.max(0, Math.min(totalTextPages - 1, Math.floor(target.offsetLeft / step)));
+        goToTextPage(targetPage, true);
+      }
+    } else {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function attachTextGestureHandlers(viewportEl) {
+    viewportEl.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button, a, input, select, textarea')) return;
+      textTouchStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+      textTouchPointerId = e.pointerId;
+    });
+
+    viewportEl.addEventListener('pointerup', (e) => {
+      if (!textTouchStart || (textTouchPointerId !== null && e.pointerId !== textTouchPointerId)) return;
+      const dx = e.clientX - textTouchStart.x;
+      const dy = e.clientY - textTouchStart.y;
+      const dt = performance.now() - textTouchStart.t;
+      textTouchStart = null;
+      textTouchPointerId = null;
+
+      if (Math.abs(dx) > 40 && Math.abs(dx) > 1.2 * Math.abs(dy)) {
+        if (dx < 0) goToTextPage(textCurrentPage + 1);
+        else goToTextPage(textCurrentPage - 1);
+        return;
+      }
+
+      if (Math.hypot(dx, dy) < 16 && dt < 400) {
+        const w = window.innerWidth;
+        if (e.clientX < w * 0.22) {
+          goToTextPage(textCurrentPage - 1);
+        } else if (e.clientX > w * 0.78) {
+          goToTextPage(textCurrentPage + 1);
+        } else {
+          overlay.classList.toggle('reader-chrome-hidden');
+        }
+      }
+    });
+
+    viewportEl.addEventListener('pointercancel', () => {
+      textTouchStart = null;
+      textTouchPointerId = null;
+    });
+
+    viewportEl.addEventListener('wheel', (e) => {
+      const now = performance.now();
+      if (now - wheelFlipAt < 240) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+      if (Math.abs(delta) > 15) {
+        wheelFlipAt = now;
+        if (delta > 0) goToTextPage(textCurrentPage + 1);
+        else goToTextPage(textCurrentPage - 1);
+      }
+    }, { passive: true });
+  }
+
+  async function renderTextStage(targetPageOrAnchor) {
     let bodyHtml = '';
     tocItems = [];
 
@@ -652,16 +827,38 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       bodyHtml = parseMarkdown(currentArticle.content_markdown || '');
     }
 
+    cachedTextBodyHtml = bodyHtml;
+
+    if (settings.viewMode === 'swipe') {
+      await renderTextSwipeStage(targetPageOrAnchor);
+    } else {
+      await renderTextScrollStage(targetPageOrAnchor);
+    }
+  }
+
+  async function renderTextSwipeStage(targetPageOrAnchor) {
+    if (scrollObserver) {
+      scrollObserver.disconnect();
+      scrollObserver = null;
+    }
+    stageEl.className = `reader-stage reader-stage--text-swipe reader-theme-${settings.theme}`;
+    stageEl.style.setProperty('--reader-font-size', `${settings.fontSize}px`);
+    stageEl.scrollTop = 0;
+
+    const bookShort = currentArticle?.source?.book_short || currentArticle?.source?.book || '';
     stageEl.innerHTML = `
-      <article class="reader-text-wrap" id="readerTextArticle">
-        <h1 class="reader-article-title">${escapeHtml(currentArticle.title)}</h1>
-        <div class="reader-article-meta">${escapeHtml(currentArticle.source?.book || '')} · стр. ${escapeHtml(currentArticle.source?.pages || '')}</div>
-        <div class="reader-text-body">${bodyHtml}</div>
-      </article>
+      <div class="reader-text-viewport" id="readerTextViewport">
+        <div class="reader-text-track" id="readerTextTrack">
+          <h1 class="reader-article-title">${escapeHtml(currentArticle.title)}</h1>
+          <div class="reader-article-meta">${escapeHtml(bookShort)}</div>
+          <div class="reader-text-body">${cachedTextBodyHtml}</div>
+        </div>
+      </div>
     `;
 
     // Собираем оглавление для Markdown из заголовков
     if (format === 'markdown') {
+      tocItems = [];
       stageEl.querySelectorAll('.reader-text-body h2, .reader-text-body h3').forEach((h, i) => {
         const id = h.id || `md-sec-${i + 1}`;
         h.id = id;
@@ -669,7 +866,81 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       });
     }
 
-    // Восстановление скролла
+    const viewportEl = document.getElementById('readerTextViewport');
+    const trackEl = document.getElementById('readerTextTrack');
+    if (!viewportEl || !trackEl) return;
+
+    recalculateTextSwipePages(false);
+    attachTextGestureHandlers(viewportEl);
+
+    if (textResizeObserver) {
+      textResizeObserver.disconnect();
+    }
+    textResizeObserver = new ResizeObserver(() => {
+      if (settings.viewMode === 'swipe' && (format === 'fb2' || format === 'markdown' || format === 'txt')) {
+        recalculateTextSwipePages(false);
+      }
+    });
+    textResizeObserver.observe(viewportEl);
+
+    trackEl.querySelectorAll('img').forEach((img) => {
+      if (!img.complete) {
+        img.addEventListener('load', () => recalculateTextSwipePages(false), { once: true });
+      }
+    });
+
+    if (targetPageOrAnchor) {
+      if (typeof targetPageOrAnchor === 'number') {
+        textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, targetPageOrAnchor - 1));
+      } else if (typeof targetPageOrAnchor === 'string') {
+        const el = document.getElementById(targetPageOrAnchor.replace(/^#/, ''));
+        if (el) {
+          const colWidth = Math.max(260, viewportEl.clientWidth - 48);
+          const colGap = 48;
+          const step = colWidth + colGap;
+          textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, Math.floor(el.offsetLeft / step)));
+        }
+      }
+      goToTextPage(textCurrentPage, false);
+    } else {
+      const saved = await getProgress(currentArticle.id);
+      if (saved?.textPage != null) {
+        textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, Number(saved.textPage)));
+      } else if (saved?.scrollRatio != null && totalTextPages > 1) {
+        textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, Math.round(saved.scrollRatio * (totalTextPages - 1))));
+      }
+      goToTextPage(textCurrentPage, false);
+    }
+  }
+
+  async function renderTextScrollStage(targetPageOrAnchor) {
+    if (textResizeObserver) {
+      textResizeObserver.disconnect();
+      textResizeObserver = null;
+    }
+    stageEl.className = `reader-stage reader-stage--text reader-theme-${settings.theme}`;
+    stageEl.style.setProperty('--reader-font-size', `${settings.fontSize}px`);
+
+    const bookShort = currentArticle?.source?.book_short || currentArticle?.source?.book || '';
+    stageEl.innerHTML = `
+      <article class="reader-text-wrap" id="readerTextArticle">
+        <h1 class="reader-article-title">${escapeHtml(currentArticle.title)}</h1>
+        <div class="reader-article-meta">${escapeHtml(bookShort)}</div>
+        <div class="reader-text-body">${cachedTextBodyHtml}</div>
+      </article>
+    `;
+
+    if (format === 'markdown') {
+      tocItems = [];
+      stageEl.querySelectorAll('.reader-text-body h2, .reader-text-body h3').forEach((h, i) => {
+        const id = h.id || `md-sec-${i + 1}`;
+        h.id = id;
+        tocItems.push({ id, title: h.textContent.trim(), level: h.tagName === 'H2' ? 1 : 2 });
+      });
+    }
+
+    updateTextScrollChrome();
+
     const saved = await getProgress(currentArticle.id);
     if (saved?.scrollRatio && !targetPageOrAnchor) {
       requestAnimationFrame(() => {
@@ -695,15 +966,20 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
 
     stageEl.onscroll = () => updateTextProgress(false);
     stageEl.onclick = (e) => {
-      const link = e.target.closest('.doc-link');
+      const link = e.target.closest('.doc-link, a[href^="#"]');
       if (link) {
         const targetId = link.getAttribute('data-internal-id') || link.getAttribute('href') || '';
         if (targetId.startsWith('#')) {
           e.preventDefault();
           const [cleanId, query = ''] = targetId.slice(1).split('?');
-          const nextPage = parseInt(new URLSearchParams(query).get('p'), 10) || null;
-          const targetArticle = getCatalog().find((a) => a.id === cleanId);
-          if (targetArticle) open(targetArticle, nextPage);
+          const targetEl = document.getElementById(cleanId);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            const nextPage = parseInt(new URLSearchParams(query).get('p'), 10) || null;
+            const targetArticle = getCatalog().find((a) => a.id === cleanId);
+            if (targetArticle) open(targetArticle, nextPage);
+          }
         }
         return;
       }
@@ -712,6 +988,21 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     };
     updateTextProgress(true);
     updateNoteBadge();
+  }
+
+  async function switchTextViewMode(nextMode) {
+    if (nextMode === 'swipe') {
+      const maxScroll = Math.max(1, stageEl.scrollHeight - stageEl.clientHeight);
+      const ratio = Math.min(1, Math.max(0, stageEl.scrollTop / maxScroll));
+      await renderTextSwipeStage();
+      textCurrentPage = Math.min(totalTextPages - 1, Math.max(0, Math.round(ratio * (totalTextPages - 1))));
+      goToTextPage(textCurrentPage, false);
+    } else {
+      const ratio = totalTextPages > 1 ? (textCurrentPage / (totalTextPages - 1)) : 0;
+      await renderTextScrollStage();
+      const maxScroll = Math.max(1, stageEl.scrollHeight - stageEl.clientHeight);
+      stageEl.scrollTop = ratio * maxScroll;
+    }
   }
 
   function goToIndex(idx) {
@@ -830,7 +1121,7 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
           btn.addEventListener('click', () => {
             const target = document.getElementById(btn.getAttribute('data-sec-id'));
             tocSheet.classList.remove('open');
-            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (target) jumpTextToElement(target);
           });
         });
       }
@@ -872,11 +1163,22 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     updateBookmarkUi();
 
     const isPageMode = format === 'images' || format === 'pdf';
-    if (bottomControlsPage) bottomControlsPage.style.display = isPageMode ? 'flex' : 'none';
-    if (bottomControlsText) bottomControlsText.style.display = isPageMode ? 'none' : 'flex';
-    if (typoBar) typoBar.style.display = isPageMode ? 'none' : 'flex';
-    if (modeToggleBtn) modeToggleBtn.style.display = isPageMode ? 'inline-flex' : 'none';
-    if (pageLabel) pageLabel.style.display = isPageMode ? 'inline' : 'none';
+    const isSwipe = settings.viewMode === 'swipe';
+    if (modeToggleBtn) {
+      modeToggleBtn.style.display = 'inline-flex';
+      modeToggleBtn.textContent = isSwipe ? 'Свайп' : 'Лента';
+    }
+    if (isPageMode) {
+      if (bottomControlsPage) bottomControlsPage.style.display = isSwipe ? 'flex' : 'none';
+      if (bottomControlsText) bottomControlsText.style.display = 'none';
+      if (typoBar) typoBar.style.display = 'none';
+      if (pageLabel) pageLabel.style.display = 'inline';
+    } else {
+      if (typoBar) typoBar.style.display = 'flex';
+      if (bottomControlsPage) bottomControlsPage.style.display = isSwipe ? 'flex' : 'none';
+      if (bottomControlsText) bottomControlsText.style.display = isSwipe ? 'none' : 'flex';
+      if (pageLabel) pageLabel.style.display = isSwipe ? 'inline' : 'none';
+    }
 
     if (format === 'images') {
       pages = extractWebpPages(article);
@@ -967,6 +1269,10 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       scrollObserver.disconnect();
       scrollObserver = null;
     }
+    if (textResizeObserver) {
+      textResizeObserver.disconnect();
+      textResizeObserver = null;
+    }
     if (activeCustomBlobUrl) {
       URL.revokeObjectURL(activeCustomBlobUrl);
       activeCustomBlobUrl = null;
@@ -987,8 +1293,20 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
   });
   tocBtn?.addEventListener('click', openTocSheet);
   tocCloseBtn?.addEventListener('click', () => tocSheet?.classList.remove('open'));
-  prevBtn?.addEventListener('click', () => goToIndex(currentIndex - 1));
-  nextBtn?.addEventListener('click', () => goToIndex(currentIndex + 1));
+  prevBtn?.addEventListener('click', () => {
+    if (format === 'images' || format === 'pdf') {
+      goToIndex(currentIndex - 1);
+    } else if (settings.viewMode === 'swipe') {
+      goToTextPage(textCurrentPage - 1);
+    }
+  });
+  nextBtn?.addEventListener('click', () => {
+    if (format === 'images' || format === 'pdf') {
+      goToIndex(currentIndex + 1);
+    } else if (settings.viewMode === 'swipe') {
+      goToTextPage(textCurrentPage + 1);
+    }
+  });
 
   scrubber?.addEventListener('input', (e) => {
     const idx = Number(e.target.value);
@@ -998,16 +1316,33 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
         const pNum = pages[idx]?.pageNum ?? (idx + 1);
         pageLabel.textContent = `стр. ${pNum} · ${idx + 1} / ${pages.length}`;
       }
+    } else if (settings.viewMode === 'swipe') {
+      textCurrentPage = idx;
+      if (pageLabel) {
+        pageLabel.textContent = totalTextPages > 0
+          ? `стр. ${idx + 1} · ${idx + 1} / ${totalTextPages}`
+          : '';
+      }
     }
   });
-  scrubber?.addEventListener('change', (e) => goToIndex(Number(e.target.value)));
+  scrubber?.addEventListener('change', (e) => {
+    const val = Number(e.target.value);
+    if (format === 'images' || format === 'pdf') {
+      goToIndex(val);
+    } else if (settings.viewMode === 'swipe') {
+      goToTextPage(val);
+    }
+  });
 
   modeToggleBtn?.addEventListener('click', async () => {
-    if (format !== 'images' && format !== 'pdf') return;
     const nextMode = settings.viewMode === 'swipe' ? 'scroll' : 'swipe';
     settings = await saveReaderSettings({ viewMode: nextMode });
-    if (nextMode === 'swipe') await renderSwipeStage();
-    else renderScrollStage();
+    if (format === 'images' || format === 'pdf') {
+      if (nextMode === 'swipe') await renderSwipeStage();
+      else renderScrollStage();
+    } else {
+      await switchTextViewMode(nextMode);
+    }
   });
 
   // Typography controls
@@ -1018,12 +1353,16 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       const nextSize = Math.min(22, Math.max(13, settings.fontSize + delta));
       settings = await saveReaderSettings({ fontSize: nextSize });
       stageEl.style.setProperty('--reader-font-size', `${nextSize}px`);
+      if (settings.viewMode === 'swipe' && (format === 'fb2' || format === 'markdown' || format === 'txt')) {
+        recalculateTextSwipePages(true);
+      }
     }
     const themeBtn = e.target.closest('[data-reader-theme]');
     if (themeBtn) {
       const theme = themeBtn.getAttribute('data-reader-theme');
       settings = await saveReaderSettings({ theme });
-      stageEl.className = `reader-stage reader-stage--text reader-theme-${theme}`;
+      const baseClass = settings.viewMode === 'swipe' ? 'reader-stage--text-swipe' : 'reader-stage--text';
+      stageEl.className = `reader-stage ${baseClass} reader-theme-${theme}`;
     }
   });
 
@@ -1080,10 +1419,12 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
       if (notesSheet?.classList.contains('open')) notesSheet.classList.remove('open');
       else if (tocSheet?.classList.contains('open')) tocSheet.classList.remove('open');
       else close();
-    } else if (!isTyping && e.key === 'ArrowRight' && (format === 'images' || format === 'pdf')) {
-      goToIndex(currentIndex + 1);
-    } else if (!isTyping && e.key === 'ArrowLeft' && (format === 'images' || format === 'pdf')) {
-      goToIndex(currentIndex - 1);
+    } else if (!isTyping && e.key === 'ArrowRight') {
+      if (format === 'images' || format === 'pdf') goToIndex(currentIndex + 1);
+      else if (settings.viewMode === 'swipe') goToTextPage(textCurrentPage + 1);
+    } else if (!isTyping && e.key === 'ArrowLeft') {
+      if (format === 'images' || format === 'pdf') goToIndex(currentIndex - 1);
+      else if (settings.viewMode === 'swipe') goToTextPage(textCurrentPage - 1);
     }
   });
 

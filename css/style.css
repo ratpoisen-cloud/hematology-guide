@@ -1736,6 +1736,100 @@ body.reader-open {
   padding: 20px 16px 90px;
 }
 
+/* Multi-column Horizontal Swipe Pagination for FB2 / Markdown */
+.reader-stage--text-swipe {
+  overflow: hidden !important;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0 !important;
+  box-sizing: border-box;
+}
+
+.reader-text-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 24px 24px 20px;
+}
+
+.reader-text-track {
+  height: 100%;
+  box-sizing: border-box;
+  column-fill: auto;
+  font-size: var(--reader-font-size, 16px);
+  line-height: 1.68;
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+
+.reader-text-track .reader-article-title {
+  font-size: 1.35em;
+  line-height: 1.25;
+  font-weight: 700;
+  margin-bottom: 6px;
+  break-inside: avoid;
+  break-after: avoid;
+}
+
+.reader-text-track .reader-article-meta {
+  font-size: 0.8em;
+  opacity: 0.68;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid currentColor;
+  border-bottom-color: rgba(128, 128, 128, 0.2);
+  break-inside: avoid;
+  break-after: avoid;
+}
+
+.reader-text-track h1,
+.reader-text-track h2,
+.reader-text-track h3 {
+  margin: 1.2em 0 0.5em;
+  line-height: 1.3;
+  break-inside: avoid;
+  break-after: avoid;
+}
+
+.reader-text-track p {
+  margin-bottom: 0.85em;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+.reader-text-track table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84em;
+  margin: 0.8em 0;
+  break-inside: avoid;
+}
+
+.reader-text-track th,
+.reader-text-track td {
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.reader-text-track .fb2-inline-img {
+  max-width: 100%;
+  max-height: 50vh;
+  object-fit: contain;
+  border-radius: 8px;
+  margin: 8px auto;
+  display: block;
+  break-inside: avoid;
+}
+
 .reader-theme-light {
   background: #ffffff;
   color: #1d1d1f;
