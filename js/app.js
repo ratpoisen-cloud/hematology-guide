@@ -509,7 +509,7 @@ async function renderMyMaterialsTiles() {
       ? `<span class="source-tile-cover"><img src="${item.customThumbnail || item.thumbnail}" alt="Обложка" loading="lazy"></span>`
       : `<span class="source-tile-icon" style="color: var(--accent); background: rgba(0, 113, 227, 0.08); font-size: 0.72rem; font-weight: 800;">${fmtBadge}</span>`;
 
-    const pages = item.pages || 1;
+    const pages = Number(item.pages) || Number(item.pdf?.pages) || Number(item.source?.pages) || 1;
     const pagesText = `${pages} ${pluralForm(pages, ['страница', 'страницы', 'страниц'])}`;
     const sizeText = formatFileSize(item.fileSize || item.size || 0);
 
@@ -843,6 +843,11 @@ reader = createReader({
   onToggleBookmark: toggleBookmarkById,
   onNotesChanged: () => {
     if (currentTab === 'bookmarks') renderBookmarks();
+  },
+  onClose: () => {
+    if (currentTab === 'search' && navLevel === 'my-materials') {
+      renderMyMaterialsTiles();
+    }
   },
 });
 

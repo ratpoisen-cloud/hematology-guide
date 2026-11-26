@@ -180,6 +180,8 @@ export function customMaterialToCatalogItem(record) {
   const meta = getSectionMeta(record.section || 'my-materials');
   const fmt = record.format || 'pdf';
 
+  const pages = Number(record.pages) || Number(record.pdf?.pages) || 1;
+
   const item = {
     id: record.id,
     title: record.title,
@@ -187,12 +189,14 @@ export function customMaterialToCatalogItem(record) {
     format: fmt,
     type: fmt === 'pdf' ? 'pdf' : (fmt === 'fb2' ? 'fb2' : 'markdown'),
     targetSection: record.section || 'my-materials',
+    pages: pages,
     source: {
       book_id: meta.book_id,
       book_title: meta.book_title,
       book_short: meta.book_short,
       book_tile_title: record.title,
       book_cover: record.thumbnail || null,
+      pages: pages,
       year: new Date(record.addedAt || Date.now()).getFullYear(),
     },
     customThumbnail: record.thumbnail || null,
@@ -206,9 +210,9 @@ export function customMaterialToCatalogItem(record) {
     item.pdf = {
       isCustom: true,
       customId: record.id,
-      pages: record.pages || 1,
+      pages: pages,
       start: 1,
-      end: record.pages || 1,
+      end: pages,
     };
   } else if (fmt === 'fb2') {
     item.fb2 = {

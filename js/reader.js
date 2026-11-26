@@ -12,6 +12,7 @@ import {
   getReaderSettings,
   saveReaderSettings,
   getCustomMaterial,
+  saveCustomMaterial,
 } from './storage.js';
 
 const NOTE_COLORS = [
@@ -147,7 +148,7 @@ export function parseFb2Xml(xmlText) {
 // ==========================================================================
 // Единый Reader Controller
 // ==========================================================================
-export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggleBookmark, onNotesChanged }) {
+export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggleBookmark, onNotesChanged, onClose }) {
   const overlay = document.getElementById('readerOverlay');
   if (!overlay) return null;
 
@@ -923,6 +924,28 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
           }
         }
         pdfDoc = await pdfjsLib.getDocument(pdfSource).promise;
+        if (pdfDoc && pdfDoc.numPages && pdfDoc.numPages !== pages.length) {
+          const actualTotal = pdfDoc.numPages;
+          article.pages = actualTotal;
+          if (article.pdf) {
+            article.pdf.pages = actualTotal;
+            article.pdf.end = actualTotal;
+          }
+          if (article.source) article.source.pages = actualTotal;
+          pages = Array.from({ length: actualTotal }, (_, i) => ({
+            index: i,
+            localPage: i + 1,
+            pageNum: Number(pdf.start || 1) + i,
+          }));
+          if (pdf.isCustom && pdf.customId) {
+            getCustomMaterial(pdf.customId).then(rec => {
+              if (rec && rec.pages !== actualTotal) {
+                rec.pages = actualTotal;
+                saveCustomMaterial(rec);
+              }
+            }).catch(() => {});
+          }
+        }
         if (settings.viewMode === 'swipe') await renderSwipeStage();
         else renderScrollStage();
       } catch (err) {
@@ -950,6 +973,7 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
     pdfRenderCache.clear();
     stageEl.innerHTML = '';
     currentArticle = null;
+    if (onClose) onClose();
   }
 
   // Bind UI controls
