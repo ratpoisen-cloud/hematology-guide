@@ -6,6 +6,7 @@
    ========================================================================== */
 
 :root {
+  color-scheme: light;
   --bg: #f4f5f8;                /* Воздушный светло-жемчужный фон (fintech light) */
   --bg-surface: #ffffff;
   --bg-card: #ffffff;
@@ -57,7 +58,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
-  overflow-x: hidden;
+  min-height: 100dvh;
   width: 100%;
 }
 
@@ -70,6 +71,7 @@ body {
   max-width: 1080px;
   margin: 0 auto;
   width: 100%;
+  overflow-x: hidden;
 }
 
 /* ==========================================================================
@@ -2384,6 +2386,7 @@ body.reader-open {
 
 /* Dark Theme Palette */
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0f1014;
   --bg-surface: #181a21;
   --bg-card: #181a21;
@@ -3616,6 +3619,29 @@ body.on-home {
 .cr-card-btn-link:hover {
   border-color: var(--border-hover);
   color: var(--text-primary);
+}
+
+/* ==========================================================================
+   iOS Safari Mobile Keyboard & Viewport Stability
+   ========================================================================== */
+
+/* Предотвращает принудительный зум iOS Safari при фокусе (требуется font-size >= 16px) */
+@media screen and (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  .search-input,
+  .text-input {
+    font-size: 16px !important;
+  }
+}
+
+/* Скрывает нижний док при открытой экранной клавиатуре для устранения конфликтов visualViewport на iOS */
+body.keyboard-open .dock-bar {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 

@@ -2286,4 +2286,33 @@ function initCustomMaterialsModule() {
   });
 }
 
+// iOS Keyboard & Viewport stabilizer: предотвращает смещение виртуальной клавиатуры и сбои visualViewport
+if (typeof window !== 'undefined') {
+  const isInputTarget = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
+
+  window.addEventListener('focusin', (e) => {
+    if (isInputTarget(e.target)) {
+      document.body.classList.add('keyboard-open');
+    }
+  });
+
+  window.addEventListener('focusout', (e) => {
+    if (isInputTarget(e.target)) {
+      document.body.classList.remove('keyboard-open');
+      // Сброс залипания скролла WebKit после закрытия клавиатуры
+      setTimeout(() => {
+        window.scrollTo({ top: window.scrollY, behavior: 'instant' });
+      }, 80);
+    }
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      if (window.visualViewport.height >= window.innerHeight * 0.9) {
+        document.body.classList.remove('keyboard-open');
+      }
+    });
+  }
+}
+
 init();
