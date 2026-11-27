@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gem-ref-v60';
+const CACHE_NAME = 'gem-ref-v62';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

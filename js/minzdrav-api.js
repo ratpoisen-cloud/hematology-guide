@@ -39,24 +39,28 @@ async function fetchWithFallback(pathAndQuery, options = {}) {
     urlsToTry.push(`${base}/${pathAndQuery.replace(/^\/+/, '')}`);
   }
 
-  // Прямой доступ к Минздраву (поддерживает CORS по умолчанию)
-  urlsToTry.push(`${DEFAULT_MINZDRAV_API}/${pathAndQuery.replace(/^\/+/, '')}`);
-
-  // Если открыто локально, пробуем локальный dev-прокси
+  // Если открыто локально, локальный dev-прокси имеет высший приоритет (обходит CORS и стримит PDF)
   if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     urlsToTry.push(`/api/cr-proxy/${pathAndQuery.replace(/^\/+/, '')}`);
   }
 
+  // Прямой доступ к Минздраву (поддерживает CORS по умолчанию)
+  urlsToTry.push(`${DEFAULT_MINZDRAV_API}/${pathAndQuery.replace(/^\/+/, '')}`);
+
   let lastError = null;
   for (const url of urlsToTry) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
     try {
-      const resp = await fetch(url, options);
+      const fetchOpts = { ...options, signal: controller.signal };
+      const resp = await fetch(url, fetchOpts);
+      clearTimeout(timer);
       if (resp.ok) return resp;
       if (resp.status === 404 || resp.status === 500) {
-        // Сервер ответил ошибкой приложения
         lastError = new Error(`Сервер вернул статус ${resp.status}`);
       }
     } catch (err) {
+      clearTimeout(timer);
       lastError = err;
       // Пробуем следующий URL
     }

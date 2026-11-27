@@ -39,16 +39,14 @@ let bookmarks = JSON.parse(localStorage.getItem('gem_bookmarks') || '[]');
 let offlineSummaryMap = new Map();
 let reader = null;
 
-// Вариант B: Рубрикатор КР Минздрава РФ (онлайн-поиск и сохранение PDF)
-let currentCrMode = 'offline'; // 'offline' | 'online'
-let crOnlineQuery = '';
-let crOnlinePage = 1;
-let crOnlineTotal = 0;
-let crOnlineLoading = false;
-let crOnlineError = null;
-let crOnlineResults = [];
+// Онлайн-поиск по Рубрикатору КР Минздрава РФ (внутри поиска)
+let crSearchOnlineActive = false;
+let crSearchOnlineQuery = '';
+let crSearchOnlineTotal = 0;
+let crSearchOnlineLoading = false;
+let crSearchOnlineError = null;
+let crSearchOnlineResults = [];
 let crDownloadingIds = new Set();
-let crDebounceTimer = null;
 
 // DOM Elements
 const homeView = document.getElementById('homeView');
@@ -200,9 +198,6 @@ function updateBookChipStates() {
 }
 
 function setActiveBookFilter(bid) {
-  if (bid !== 'cr-rf') {
-    currentCrMode = 'offline';
-  }
   activeBookFilter = bid;
   navLevel = bid === 'all' ? 'sources' : 'articles';
   updateBookChipStates();
@@ -210,7 +205,6 @@ function setActiveBookFilter(bid) {
 }
 
 function setNavLevel(level) {
-  currentCrMode = 'offline';
   navLevel = level;
   activeBookFilter = 'all';
   updateBookChipStates();
@@ -748,43 +742,41 @@ async function renderBookTiles() {
   });
 }
 
-// === Методы Варианта B: Рубрикатор КР Минздрава РФ ===
+// === Онлайн-поиск по реестру КР Минздрава РФ ===
 
-async function loadOnlineCrData(reset = false) {
-  if (reset) {
-    crOnlinePage = 1;
-    crOnlineResults = [];
-  }
-  crOnlineLoading = true;
-  crOnlineError = null;
-  renderOnlineCrContainer();
+async function loadOnlineCrForSearch(query) {
+  const cleanQ = (query || '').trim();
+  if (!cleanQ) return;
+
+  crSearchOnlineActive = true;
+  crSearchOnlineQuery = cleanQ;
+  crSearchOnlineLoading = true;
+  crSearchOnlineError = null;
+  crSearchOnlineResults = [];
+  performSearch();
 
   try {
     const res = await searchMinzdravRegistry({
-      query: crOnlineQuery,
-      page: crOnlinePage,
+      query: cleanQ,
+      page: 1,
       pageSize: 20,
     });
-    crOnlineTotal = res.total;
-    if (reset) {
-      crOnlineResults = res.items;
-    } else {
-      crOnlineResults = [...crOnlineResults, ...res.items];
-    }
+    crSearchOnlineTotal = res.total;
+    crSearchOnlineResults = res.items;
   } catch (err) {
-    console.error('Ошибка загрузки КР Минздрава:', err);
-    crOnlineError = err.message || 'Ошибка подключения к серверу Минздрава';
+    console.error('Ошибка поиска в реестре Минздрава:', err);
+    crSearchOnlineError = err.message || 'Не удалось связаться с реестром Минздрава';
   } finally {
-    crOnlineLoading = false;
-    renderOnlineCrContainer();
+    crSearchOnlineLoading = false;
+    performSearch();
   }
 }
 
 async function handleDownloadCrPdf(codeVersion, title, year) {
   if (crDownloadingIds.has(codeVersion)) return;
   crDownloadingIds.add(codeVersion);
-  renderOnlineCrContainer();
-  showToast(`Загрузка PDF «${title}» с сервера Минздрава…`);
+  performSearch();
+  showToast(`Загрузка официального PDF «${title}»…`);
 
   try {
     const blob = await fetchMinzdravPdfBlob(codeVersion);
@@ -808,145 +800,111 @@ async function handleDownloadCrPdf(codeVersion, title, year) {
     renderBookFilters();
 
     showToast(`✓ Рекомендация «${title}» сохранена в ридер!`);
+
+    if (reader) {
+      reader.open(catItem);
+    }
   } catch (err) {
     console.error('Ошибка скачивания КР:', err);
     alert('Не удалось скачать документ: ' + err.message);
   } finally {
     crDownloadingIds.delete(codeVersion);
-    renderOnlineCrContainer();
+    performSearch();
   }
 }
 
-function renderOnlineCrContainer() {
-  const container = document.getElementById('crOnlineContainer');
-  if (!container) return;
+function renderOnlineBlockHtml(query) {
+  if (!crSearchOnlineActive || crSearchOnlineQuery !== query) return '';
 
-  const countEl = document.getElementById('crOnlineCountText');
-  if (countEl) {
-    countEl.textContent = crOnlineTotal > 0
-      ? `Найдено ${crOnlineTotal} ${pluralForm(crOnlineTotal, ['рекомендация', 'рекомендации', 'рекомендаций'])} Минздрава РФ`
-      : (crOnlineLoading ? 'Поиск в реестре Минздрава РФ…' : '0 рекомендаций');
-  }
-
-  if (crOnlineLoading && crOnlineResults.length === 0) {
-    container.innerHTML = `
+  let bodyHtml = '';
+  if (crSearchOnlineLoading) {
+    bodyHtml = `
       <div class="cr-state-box">
         <div class="cr-spinner"></div>
-        <div class="cr-state-title">Загрузка из реестра Минздрава РФ…</div>
-        <div class="cr-state-desc">Подключаемся к официальной базе clinical recommendations (cr.minzdrav.gov.ru)</div>
+        <div class="cr-state-title">Поиск в реестре Минздрава РФ…</div>
+        <div class="cr-state-desc">Ищем утвержденные клинические рекомендации по запросу «${escapeHtml(query)}» на сервере Минздрава (cr.minzdrav.gov.ru)</div>
       </div>
     `;
-    return;
-  }
-
-  if (crOnlineError && crOnlineResults.length === 0) {
-    container.innerHTML = `
+  } else if (crSearchOnlineError) {
+    bodyHtml = `
       <div class="cr-state-box">
-        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-        <div class="cr-state-title">Не удалось подключиться к реестру</div>
-        <div class="cr-state-desc">${escapeHtml(crOnlineError)}</div>
-        <button type="button" class="cr-retry-btn" id="crRetryBtn">Повторить попытку</button>
+        <div class="cr-state-title">Ошибка связи с сервером Минздрава</div>
+        <div class="cr-state-desc">${escapeHtml(crSearchOnlineError)}</div>
+        <button type="button" class="cr-retry-btn" id="crOnlineRetryBtn">Повторить попытку</button>
       </div>
     `;
-    document.getElementById('crRetryBtn')?.addEventListener('click', () => loadOnlineCrData(true));
-    return;
-  }
-
-  if (!crOnlineLoading && crOnlineResults.length === 0) {
-    container.innerHTML = `
+  } else if (!crSearchOnlineResults.length) {
+    bodyHtml = `
       <div class="cr-state-box">
-        <div class="cr-state-title">Ничего не найдено</div>
-        <div class="cr-state-desc">По запросу «${escapeHtml(crOnlineQuery)}» клинических рекомендаций в реестре Минздрава не найдено. Попробуйте изменить формулировку или выбрать быстрый фильтр выше.</div>
+        <div class="cr-state-title">Рекомендаций не найдено</div>
+        <div class="cr-state-desc">По запросу «${escapeHtml(query)}» в официальном реестре Минздрава РФ ничего не найдено. Попробуйте сформулировать запрос иначе (например, по нозологии или коду МКБ).</div>
       </div>
     `;
-    return;
+  } else {
+    const cards = crSearchOnlineResults.map((item, index) => {
+      const downloaded = findDownloadedCr(item.codeVersion, item.title, catalogData);
+      const isDownloading = crDownloadingIds.has(item.codeVersion);
+
+      const actionBtn = downloaded
+        ? `<button type="button" class="cr-card-btn cr-card-btn-read" data-open-custom-id="${downloaded.id}" title="Открыть документ в ридере">
+             <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+             <span>В ридере ✓</span>
+           </button>`
+        : `<button type="button" class="cr-card-btn cr-card-btn-download ${isDownloading ? 'loading' : ''}" data-download-cr="${item.codeVersion}" data-cr-title="${escapeHtml(item.title)}" data-cr-year="${item.year}" title="Скачать PDF Минздрава и открыть в ридере">
+             ${isDownloading ? '<span class="cr-spinner" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Загрузка…' : '<svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 11.586V4a1 1 0 011-1z" clip-rule="evenodd"/><path d="M4 17a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z"/></svg> <span>В ридер ⬇</span>'}
+           </button>`;
+
+      const portalBtn = `<a href="${sanitizeHref(item.webUrl)}" target="_blank" rel="noopener noreferrer" class="cr-card-btn cr-card-btn-link" title="Открыть на официальном портале Минздрава">Портал ↗</a>`;
+      const mkbPills = item.mkbCodes.slice(0, 3).map(c => `<span class="tag-pill">${escapeHtml(c)}</span>`).join('');
+      const devText = item.developers.length ? escapeHtml(item.developers[0]) : '';
+
+      return `
+        <article class="card-tile" style="animation-delay: ${Math.min(index * 20, 160)}ms">
+          <div>
+            <div class="card-meta-bar">
+              <span class="card-source-tag">КР № ${escapeHtml(item.codeVersion)} · ${item.year} г.</span>
+              <span class="card-page-meta">${escapeHtml(item.ageCategory)}</span>
+            </div>
+            <h2 class="card-title">${escapeHtml(item.title)}</h2>
+            ${devText ? `<p class="card-snippet" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">${devText}</p>` : ''}
+            <div class="cr-card-actions">
+              ${actionBtn}
+              ${portalBtn}
+            </div>
+          </div>
+          <div class="card-footer-tags">
+            <span class="tag-pill" style="color: var(--accent); font-weight: 600;">Минздрав РФ</span>
+            ${mkbPills}
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    bodyHtml = `<div class="cr-online-grid">${cards}</div>`;
   }
 
-  const cardsHtml = crOnlineResults.map((item, index) => {
-    const downloaded = findDownloadedCr(item.codeVersion, item.title, catalogData);
-    const isDownloading = crDownloadingIds.has(item.codeVersion);
+  const countLabel = crSearchOnlineLoading
+    ? 'поиск…'
+    : `${crSearchOnlineTotal} ${pluralForm(crSearchOnlineTotal, ['рекомендация', 'рекомендации', 'рекомендаций'])}`;
 
-    const actionBtnHtml = downloaded
-      ? `<button type="button" class="cr-card-btn cr-card-btn-read" data-open-custom-id="${downloaded.id}" title="Открыть документ в ридере">
-           <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-           <span>В ридере ✓</span>
-         </button>`
-      : `<button type="button" class="cr-card-btn cr-card-btn-download ${isDownloading ? 'loading' : ''}" data-download-cr="${item.codeVersion}" data-cr-title="${escapeHtml(item.title)}" data-cr-year="${item.year}" title="Скачать PDF с сервера Минздрава и открыть в ридере">
-           ${isDownloading ? '<span class="cr-spinner" style="width:12px;height:12px;border-width:2px;margin-right:4px;"></span> Загрузка…' : '<svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 11.586V4a1 1 0 011-1z" clip-rule="evenodd"/><path d="M4 17a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z"/></svg> <span>В ридер ⬇</span>'}
-         </button>`;
-
-    const portalBtnHtml = `<a href="${sanitizeHref(item.webUrl)}" target="_blank" rel="noopener noreferrer" class="cr-card-btn cr-card-btn-link" title="Открыть на официальном портале cr.minzdrav.gov.ru">
-      <span>Портал ↗</span>
-    </a>`;
-
-    const mkbPills = item.mkbCodes.slice(0, 4).map(c => `<span class="tag-pill">${escapeHtml(c)}</span>`).join('');
-    const devText = item.developers.length ? escapeHtml(item.developers[0]) : '';
-
-    return `
-      <article class="card-tile" style="animation-delay: ${Math.min(index * 20, 160)}ms">
-        <div>
-          <div class="card-meta-bar">
-            <span class="card-source-tag">КР № ${escapeHtml(item.codeVersion)} · ${item.year} г.</span>
-            <span class="card-page-meta">${escapeHtml(item.ageCategory)}</span>
-          </div>
-
-          <h2 class="card-title">${escapeHtml(item.title)}</h2>
-
-          ${devText ? `<p class="card-snippet" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">${devText}</p>` : ''}
-
-          <div class="cr-card-actions">
-            ${actionBtnHtml}
-            ${portalBtnHtml}
-          </div>
+  return `
+    <div class="cr-online-block" id="crOnlineBlock">
+      <div class="cr-online-head">
+        <div class="cr-online-title-wrap">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="color: var(--accent);"><path d="M12 2L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-3z"/></svg>
+          <h3 class="cr-online-title">Реестр КР Минздрава РФ: «${escapeHtml(query)}»</h3>
+          <span class="cr-online-count">(${countLabel})</span>
         </div>
-
-        <div class="card-footer-tags">
-          <span class="tag-pill" style="color: var(--accent); font-weight: 600;">Минздрав РФ</span>
-          ${mkbPills}
-        </div>
-      </article>
-    `;
-  }).join('');
-
-  const loadMoreHtml = (crOnlineResults.length < crOnlineTotal)
-    ? `<button type="button" class="cr-load-more-btn" id="crLoadMoreBtn">
-         ${crOnlineLoading ? 'Загрузка…' : `Показать ещё (загружено ${crOnlineResults.length} из ${crOnlineTotal})`}
-       </button>`
-    : '';
-
-  container.innerHTML = cardsHtml + loadMoreHtml;
-
-  // Bind download and open clicks
-  container.querySelectorAll('[data-download-cr]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const code = btn.getAttribute('data-download-cr');
-      const title = btn.getAttribute('data-cr-title');
-      const year = btn.getAttribute('data-cr-year');
-      handleDownloadCrPdf(code, title, year);
-    });
-  });
-
-  container.querySelectorAll('[data-open-custom-id]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const customId = btn.getAttribute('data-open-custom-id');
-      const item = catalogData.find(a => a.id === customId);
-      if (item && reader) {
-        reader.open(item);
-      }
-    });
-  });
-
-  document.getElementById('crLoadMoreBtn')?.addEventListener('click', () => {
-    if (crOnlineLoading) return;
-    crOnlinePage += 1;
-    loadOnlineCrData(false);
-  });
+        <button type="button" class="cr-online-close-btn" id="crOnlineCloseBtn" aria-label="Скрыть" title="Скрыть результаты Минздрава">✕</button>
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
 }
 
 // Render Results Grid
 function renderResults(results, showBack = false, calcResults = []) {
+  const query = searchInput.value.trim();
   const back = getBackState();
   const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency' && activeBookFilter !== 'my-materials' && activeBookFilter !== 'cr-rf';
   const backTile = showBack
@@ -964,30 +922,13 @@ function renderResults(results, showBack = false, calcResults = []) {
         <span>Минздрав России · Рубрикатор КР</span>
       </div>
       <h3 class="cr-banner-title">Клинические рекомендации РФ</h3>
-      <p class="cr-banner-desc">Официальный государственный реестр утвержденных клинических рекомендаций по гематологии и онкогематологии. Читайте структурированное резюме офлайн или выполняйте поиск по всей базе Минздрава (780+ КР).</p>
+      <p class="cr-banner-desc">Официальный государственный реестр утвержденных клинических рекомендаций. Читайте структурированное резюме офлайн или переходите в официальный рубрикатор Минздрава.</p>
       <div class="cr-banner-actions">
         <a href="https://cr.minzdrav.gov.ru/" target="_blank" rel="noopener noreferrer" class="cr-btn-portal">
-          <span>Официальный портал</span>
+          <span>Рубрикатор Минздрава</span>
           <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clip-rule="evenodd"/></svg>
         </a>
-        <button type="button" class="cr-btn-search" id="crBannerSwitchOnline">
-          <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd"/></svg>
-          <span>Вся база Минздрава (780+) 🔍</span>
-        </button>
       </div>
-    </div>
-  ` : '';
-
-  const crModeToggleHtml = isCrRf ? `
-    <div class="cr-mode-toggle" id="crModeToggle">
-      <button type="button" class="cr-mode-btn ${currentCrMode === 'offline' ? 'active' : ''}" data-cr-mode="offline">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-        <span>Гематология (21 офлайн)</span>
-      </button>
-      <button type="button" class="cr-mode-btn ${currentCrMode === 'online' ? 'active' : ''}" data-cr-mode="online">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <span>Вся база Минздрава РФ (онлайн)</span>
-      </button>
     </div>
   ` : '';
 
@@ -995,7 +936,6 @@ function renderResults(results, showBack = false, calcResults = []) {
     const backBtn = document.getElementById('backToSourcesBtn');
     if (backBtn) {
       backBtn.addEventListener('click', () => {
-        currentCrMode = 'offline';
         if (back.target === 'calc' && calcReturnContext) {
           const returnCalcId = calcReturnContext.calcId;
           calcReturnContext = null;
@@ -1021,114 +961,86 @@ function renderResults(results, showBack = false, calcResults = []) {
     });
   };
 
-  const bindCrRfControls = () => {
-    if (!isCrRf) return;
-
-    document.getElementById('crBannerSwitchOnline')?.addEventListener('click', () => {
-      currentCrMode = 'online';
-      performSearch();
-      setTimeout(() => document.getElementById('crOnlineSearchInput')?.focus(), 60);
+  const bindCrOnlineHandlers = () => {
+    document.getElementById('crSearchOnlineTrigger')?.addEventListener('click', () => {
+      loadOnlineCrForSearch(query);
     });
 
-    document.querySelectorAll('[data-cr-mode]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const mode = btn.getAttribute('data-cr-mode');
-        if (mode && mode !== currentCrMode) {
-          currentCrMode = mode;
-          performSearch();
-          if (mode === 'online') {
-            setTimeout(() => document.getElementById('crOnlineSearchInput')?.focus(), 60);
-          }
+    document.getElementById('crOnlineCloseBtn')?.addEventListener('click', () => {
+      crSearchOnlineActive = false;
+      performSearch();
+    });
+
+    document.getElementById('crOnlineRetryBtn')?.addEventListener('click', () => {
+      loadOnlineCrForSearch(query);
+    });
+
+    articlesList.querySelectorAll('[data-download-cr]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const code = btn.getAttribute('data-download-cr');
+        const title = btn.getAttribute('data-cr-title');
+        const year = btn.getAttribute('data-cr-year');
+        handleDownloadCrPdf(code, title, year);
+      });
+    });
+
+    articlesList.querySelectorAll('[data-open-custom-id]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const customId = btn.getAttribute('data-open-custom-id');
+        const item = catalogData.find(a => a.id === customId);
+        if (item && reader) {
+          reader.open(item);
         }
       });
     });
-
-    if (currentCrMode === 'online') {
-      const searchInp = document.getElementById('crOnlineSearchInput');
-      const clearBtn = document.getElementById('crOnlineClearSearch');
-
-      searchInp?.addEventListener('input', () => {
-        clearTimeout(crDebounceTimer);
-        crDebounceTimer = setTimeout(() => {
-          crOnlineQuery = searchInp.value.trim();
-          loadOnlineCrData(true);
-        }, 350);
-      });
-
-      clearBtn?.addEventListener('click', () => {
-        crOnlineQuery = '';
-        if (searchInp) searchInp.value = '';
-        loadOnlineCrData(true);
-      });
-
-      document.querySelectorAll('.cr-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-          const val = chip.getAttribute('data-chip');
-          crOnlineQuery = val || '';
-          if (searchInp) searchInp.value = crOnlineQuery;
-          document.querySelectorAll('.cr-chip').forEach(c => c.classList.toggle('active', c === chip));
-          loadOnlineCrData(true);
-        });
-      });
-
-      renderOnlineCrContainer();
-      if (!crOnlineResults.length && !crOnlineLoading && !crOnlineError) {
-        loadOnlineCrData(true);
-      }
-    }
   };
 
-  // Режим онлайн-поиска по реестру Минздрава РФ
-  if (isCrRf && currentCrMode === 'online') {
-    itemCount.textContent = crOnlineTotal > 0
-      ? `${crOnlineTotal} ${pluralForm(crOnlineTotal, ['рекомендация', 'рекомендации', 'рекомендаций'])} · Реестр КР`
-      : 'Реестр КР Минздрава';
-
-    const onlineSearchHtml = `
-      <div class="cr-online-search-wrap">
-        <div class="cr-online-search-box">
-          <svg class="cr-search-icon" width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd"/>
-          </svg>
-          <input type="text" id="crOnlineSearchInput" class="cr-online-search-input" placeholder="Поиск по 780+ КР Минздрава: лейкоз, инфаркт, диабет..." value="${escapeHtml(crOnlineQuery)}">
-          ${crOnlineQuery ? `<button type="button" id="crOnlineClearSearch" class="cr-clear-btn" aria-label="Очистить">&times;</button>` : ''}
-        </div>
-        <div class="cr-online-quick-chips">
-          <button type="button" class="cr-chip ${!crOnlineQuery ? 'active' : ''}" data-chip="">Все (782)</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'лейкоз' ? 'active' : ''}" data-chip="лейкоз">Лейкозы</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'миелом' ? 'active' : ''}" data-chip="миелом">Миелома</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'лимфом' ? 'active' : ''}" data-chip="лимфом">Лимфомы</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'анеми' ? 'active' : ''}" data-chip="анеми">Анемии</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'тромбо' ? 'active' : ''}" data-chip="тромбо">Тромбоцитопении</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'инфаркт' ? 'active' : ''}" data-chip="инфаркт">Инфаркт</button>
-          <button type="button" class="cr-chip ${crOnlineQuery === 'диабет' ? 'active' : ''}" data-chip="диабет">Диабет</button>
-        </div>
-        <div class="cr-status-bar">
-          <span id="crOnlineCountText">Официальный реестр Минздрава РФ</span>
-        </div>
-      </div>
-      <div id="crOnlineContainer" class="cards-grid" style="grid-column: 1 / -1; display: contents;"></div>
-    `;
-
-    articlesList.innerHTML = backTile + crBannerHtml + crModeToggleHtml + onlineSearchHtml;
-    bindBack();
-    bindCrRfControls();
-    return;
-  }
-
-  // Офлайн-режим отображения
   const totalCount = (results?.length || 0) + (calcResults?.length || 0);
+
+  // Если ничего не найдено в локальной базе
   if (totalCount === 0) {
     itemCount.textContent = '0 записей';
     const isMyMaterials = activeBookFilter === 'my-materials';
-    articlesList.innerHTML = backTile + crBannerHtml + crModeToggleHtml + `
-      <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
-        <p style="font-size: 0.95rem; font-weight: 500;">${isMyMaterials ? 'В разделе «Мои материалы» пока нет файлов' : 'Ничего не найдено'}</p>
-        <p style="font-size: 0.8rem; margin-top: 4px;">${isMyMaterials ? 'Загрузите PDF, FB2, Markdown или TXT для оффлайн-доступа' : 'Попробуйте выбрать другой источник или поисковый запрос'}</p>
-        ${isMyMaterials ? `<button type="button" class="btn-primary-action" id="emptyUploadBtn" style="margin-top: 14px; max-width: 220px; display: inline-block;">+ Загрузить материал</button>` : ''}
-      </div>`;
+
+    let emptyContent = '';
+    if (isMyMaterials) {
+      emptyContent = `
+        <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
+          <p style="font-size: 0.95rem; font-weight: 500;">В разделе «Мои материалы» пока нет файлов</p>
+          <p style="font-size: 0.8rem; margin-top: 4px;">Загрузите PDF, FB2, Markdown или TXT для оффлайн-доступа</p>
+          <button type="button" class="btn-primary-action" id="emptyUploadBtn" style="margin-top: 14px; max-width: 220px; display: inline-block;">+ Загрузить материал</button>
+        </div>
+      `;
+    } else if (query) {
+      // Предлагаем поиск в реестре КР Минздрава прямо в пустом состоянии
+      const onlineBlockHtml = renderOnlineBlockHtml(query);
+      emptyContent = `
+        ${onlineBlockHtml}
+        ${!crSearchOnlineActive ? `
+          <div style="grid-column: 1/-1; text-align: center; padding: 48px 20px; color: var(--text-muted);">
+            <p style="font-size: 1rem; font-weight: 600; color: var(--text-primary);">Ничего не найдено в локальном справочнике</p>
+            <p style="font-size: 0.85rem; margin-top: 6px; max-width: 440px; margin-inline: auto;">Попробуйте найти клиническую рекомендацию по запросу «${escapeHtml(query)}» в официальном реестре Минздрава РФ (780+ документов).</p>
+            <button type="button" class="btn-primary-action" id="crSearchOnlineTrigger" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-3z"/></svg>
+              <span>Искать «${escapeHtml(query)}» в базе Минздрава (780+)</span>
+            </button>
+          </div>
+        ` : ''}
+      `;
+    } else {
+      emptyContent = `
+        <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
+          <p style="font-size: 0.95rem; font-weight: 500;">Ничего не найдено</p>
+          <p style="font-size: 0.8rem; margin-top: 4px;">Попробуйте выбрать другой источник или поисковый запрос</p>
+        </div>
+      `;
+    }
+
+    articlesList.innerHTML = backTile + crBannerHtml + emptyContent;
     bindBack();
-    bindCrRfControls();
+    bindCrOnlineHandlers();
     document.getElementById('emptyUploadBtn')?.addEventListener('click', () => {
       const sheet = document.getElementById('customUploadSheet');
       if (sheet) {
@@ -1140,6 +1052,21 @@ function renderResults(results, showBack = false, calcResults = []) {
   }
 
   itemCount.textContent = `${totalCount} ${pluralForm(totalCount, ['запись', 'записи', 'записей'])}`;
+
+  // Кнопка поиска в Минздраве над результатами, если есть поисковый запрос
+  const searchAddonHtml = (query && !crSearchOnlineActive) ? `
+    <div class="cr-search-addon">
+      <button type="button" class="cr-search-online-btn" id="crSearchOnlineTrigger">
+        <span class="cr-search-online-btn-left">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <span>Искать «${escapeHtml(query)}» в реестре КР Минздрава РФ</span>
+        </span>
+        <span class="cr-addon-badge">780+ КР</span>
+      </button>
+    </div>
+  ` : '';
+
+  const onlineBlockHtml = (query && crSearchOnlineActive) ? renderOnlineBlockHtml(query) : '';
 
   const calcCardsHtml = (calcResults || []).map((m, index) => `
     <article class="card-tile card-tile--calc" data-search-calc="${m.id}" style="animation-delay: ${Math.min(index * 25, 160)}ms">
@@ -1153,7 +1080,7 @@ function renderResults(results, showBack = false, calcResults = []) {
     </article>
   `).join('');
 
-  articlesList.innerHTML = backTile + crBannerHtml + crModeToggleHtml + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
+  articlesList.innerHTML = backTile + crBannerHtml + searchAddonHtml + onlineBlockHtml + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
     const bookTitle = item.source?.book_short || item.source?.book || 'Материал';
     const isCr = item.source?.book_id === 'cr-rf' || Boolean(item.minzdrav_url);
     const pageLabel = isCr
@@ -1198,7 +1125,7 @@ function renderResults(results, showBack = false, calcResults = []) {
   }).join('');
 
   bindBack();
-  bindCrRfControls();
+  bindCrOnlineHandlers();
 
   // Изолируем клики по внешним ссылкам Минздрава от открытия модального окна ридера
   articlesList.querySelectorAll('[data-external-link="true"]').forEach(el => {
@@ -1264,13 +1191,19 @@ function openArticleModal(article, targetPage = null) {
 // Search input handling
 searchInput.addEventListener('input', (e) => {
   const query = e.target.value;
-  if (!query.trim()) calcReturnContext = null;
+  if (!query.trim()) {
+    calcReturnContext = null;
+    crSearchOnlineActive = false;
+  } else if (crSearchOnlineActive && query.trim() !== crSearchOnlineQuery) {
+    crSearchOnlineActive = false;
+  }
   clearSearchBtn.style.display = query ? 'flex' : 'none';
   performSearch();
 });
 
 clearSearchBtn.addEventListener('click', () => {
   calcReturnContext = null;
+  crSearchOnlineActive = false;
   searchInput.value = '';
   clearSearchBtn.style.display = 'none';
   performSearch();
