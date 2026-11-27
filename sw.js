@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gem-ref-v59';
+const CACHE_NAME = 'gem-ref-v60';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const ASSETS_TO_CACHE = [
   './js/offline-books.js',
   './js/reader.js',
   './js/custom-materials.js',
+  './js/minzdrav-api.js',
   './js/vendor/pdf.min.mjs',
   './js/vendor/pdf.worker.min.mjs',
   './data/catalog.json',

@@ -3376,4 +3376,328 @@ body.on-home {
   background: rgba(244, 63, 94, 0.22);
 }
 
+/* ==========================================================================
+   Вариант B: Онлайн-поиск по всей базе Минздрава РФ (780+ КР)
+   ========================================================================== */
+
+.cr-mode-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 4px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  box-sizing: border-box;
+}
+
+.cr-mode-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.cr-mode-btn:hover {
+  color: var(--text-primary);
+}
+
+.cr-mode-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"] .cr-mode-btn.active {
+  background: #f3f4f6;
+  color: #0f1014;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.cr-online-search-wrap {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.cr-online-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.cr-online-search-box .cr-search-icon {
+  position: absolute;
+  left: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.cr-online-search-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 40px 0 40px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.cr-online-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+[data-theme="dark"] .cr-online-search-input:focus {
+  box-shadow: 0 0 0 3px rgba(243, 244, 246, 0.15);
+}
+
+.cr-online-search-box .cr-clear-btn {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cr-online-search-box .cr-clear-btn:hover {
+  color: var(--text-primary);
+}
+
+.cr-online-quick-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.cr-online-quick-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.cr-chip {
+  white-space: nowrap;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 5px 13px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.cr-chip:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.cr-chip.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+[data-theme="dark"] .cr-chip.active {
+  background: #f3f4f6;
+  color: #0f1014;
+  border-color: #f3f4f6;
+}
+
+.cr-status-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 10px 4px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.cr-state-box {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px 20px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg, 16px);
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.cr-state-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cr-state-desc {
+  font-size: 0.84rem;
+  max-width: 440px;
+  line-height: 1.45;
+}
+
+.cr-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.cr-retry-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.cr-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.cr-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.cr-card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  line-height: 1;
+}
+
+.cr-card-btn-download {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .cr-card-btn-download {
+  background: #f3f4f6;
+  color: #0f1014;
+}
+
+.cr-card-btn-download:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.cr-card-btn-download.loading {
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.cr-card-btn-read {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+  border-color: rgba(52, 199, 89, 0.3);
+}
+
+[data-theme="dark"] .cr-card-btn-read {
+  background: rgba(48, 209, 88, 0.18);
+  color: #30d158;
+  border-color: rgba(48, 209, 88, 0.4);
+}
+
+.cr-card-btn-read:hover {
+  transform: translateY(-1px);
+}
+
+.cr-card-btn-link {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.cr-card-btn-link:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.cr-load-more-btn {
+  grid-column: 1 / -1;
+  margin: 16px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
+  padding: 0 28px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cr-load-more-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+
 
