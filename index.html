@@ -15,8 +15,20 @@
   <meta name="apple-mobile-web-app-title" content="Гематология">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./css/style.css?v=57">
-  <script>try{if(localStorage.getItem('gem_app_theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
+  <link rel="stylesheet" href="./css/style.css?v=58">
+  <script>
+    try {
+      if (localStorage.getItem('gem_app_theme') === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        var ti = document.querySelector('link[rel="apple-touch-icon"]');
+        if (ti) ti.href = './icons/apple-touch-icon-dark.png';
+        var mf = document.querySelector('link[rel="manifest"]');
+        if (mf) mf.href = './manifest-dark.json';
+        var fav = document.querySelector('link[type="image/svg+xml"]');
+        if (fav) fav.href = './icons/icon-dark.svg';
+      }
+    } catch(e) {}
+  </script>
 </head>
 <body>
 
@@ -774,6 +786,6 @@
   <!-- Toast Notification -->
   <div class="toast-popup" id="toastPopup" role="status" aria-live="polite"></div>
 
-  <script type="module" src="./js/app.js?v=57"></script>
+  <script type="module" src="./js/app.js?v=58"></script>
 </body>
 </html>

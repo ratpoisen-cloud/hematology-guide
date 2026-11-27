@@ -69,6 +69,21 @@ function applyAppTheme(theme) {
   }
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) metaTheme.setAttribute('content', isDark ? '#0f1014' : '#f4f5f8');
+
+  // Динамическая адаптация иконок приложения (PWA / экран «Домой» / вкладка)
+  const touchIconLink = document.querySelector('link[rel="apple-touch-icon"]');
+  if (touchIconLink) {
+    touchIconLink.href = isDark ? './icons/apple-touch-icon-dark.png' : './icons/apple-touch-icon.png';
+  }
+  const svgFavicon = document.querySelector('link[type="image/svg+xml"]');
+  if (svgFavicon) {
+    svgFavicon.href = isDark ? './icons/icon-dark.svg' : './icons/icon.svg';
+  }
+  const manifestLink = document.querySelector('link[rel="manifest"]');
+  if (manifestLink) {
+    manifestLink.href = isDark ? './manifest-dark.json' : './manifest.json';
+  }
+
   [themeToggleBtn, homeThemeToggleBtn].forEach((btn) => {
     if (!btn) return;
     btn.innerHTML = isDark ? ICON_SUN : ICON_MOON;

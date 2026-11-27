@@ -1,8 +1,9 @@
-const CACHE_NAME = 'gem-ref-v57';
+const CACHE_NAME = 'gem-ref-v58';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './manifest.json',
+  './manifest-dark.json',
   './css/style.css',
   './js/app.js',
   './js/search-engine.js',
@@ -14,10 +15,15 @@ const ASSETS_TO_CACHE = [
   './js/vendor/pdf.worker.min.mjs',
   './data/catalog.json',
   './icons/icon.svg',
+  './icons/icon-dark.svg',
+  './icons/icon-light.svg',
   './icons/favicon-32.png',
   './icons/apple-touch-icon.png',
+  './icons/apple-touch-icon-dark.png',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-192-dark.png',
+  './icons/icon-512.png',
+  './icons/icon-512-dark.png'
 ];
 
 self.addEventListener('install', (event) => {
