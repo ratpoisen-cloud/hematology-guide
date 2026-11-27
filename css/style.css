@@ -3170,3 +3170,172 @@ body.on-home {
   color: #0f1014;
 }
 
+/* ==========================================================================
+   Официальный баннер Рубрикатора КР Минздрава РФ & Кнопки КР
+   ========================================================================== */
+
+.cr-official-banner {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(0, 113, 227, 0.06) 0%, rgba(59, 130, 246, 0.02) 100%), var(--surface);
+  border: 1px solid rgba(0, 113, 227, 0.16);
+  border-radius: var(--radius-lg, 16px);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cr-banner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.cr-banner-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.cr-banner-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.cr-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.cr-btn-portal,
+.cr-btn-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid transparent;
+}
+
+.cr-btn-portal {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.25);
+}
+
+.cr-btn-portal:hover {
+  background: #0060c0;
+  transform: translateY(-1px);
+}
+
+.cr-btn-search {
+  background: rgba(0, 113, 227, 0.08);
+  color: var(--accent);
+  border-color: rgba(0, 113, 227, 0.18);
+}
+
+.cr-btn-search:hover {
+  background: rgba(0, 113, 227, 0.14);
+  transform: translateY(-1px);
+}
+
+/* Ссылки на сайте Минздрава в карточке КР */
+.card-cr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+
+.card-cr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: rgba(0, 113, 227, 0.08);
+  color: var(--accent);
+  border: 1px solid rgba(0, 113, 227, 0.18);
+  transition: all 0.18s ease;
+}
+
+.card-cr-btn:hover {
+  background: rgba(0, 113, 227, 0.16);
+}
+
+.card-cr-btn--pdf {
+  background: rgba(225, 29, 72, 0.07);
+  color: #e11d48;
+  border-color: rgba(225, 29, 72, 0.2);
+}
+
+.card-cr-btn--pdf:hover {
+  background: rgba(225, 29, 72, 0.14);
+}
+
+/* Dark mode for Rubricator banner */
+[data-theme="dark"] .cr-official-banner {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(20, 22, 28, 0.9) 100%), #181a21;
+  border-color: rgba(59, 130, 246, 0.25);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .cr-banner-badge {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .cr-btn-search {
+  background: rgba(255, 255, 255, 0.06);
+  color: #93c5fd;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .cr-btn-search:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .card-cr-actions {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .card-cr-btn {
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+[data-theme="dark"] .card-cr-btn--pdf {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fda4af;
+  border-color: rgba(244, 63, 94, 0.28);
+}
+
+

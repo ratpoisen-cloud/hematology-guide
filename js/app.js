@@ -384,6 +384,7 @@ function getTypeLabel(type) {
 const SOURCE_ICON_BOOK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>`;
 const SOURCE_ICON_DOC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`;
 const SOURCE_ICON_STACK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>`;
+const SOURCE_ICON_SHIELD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>`;
 
 function pluralForm(n, forms) {
   const mod10 = n % 10;
@@ -435,16 +436,16 @@ function renderSectionTiles() {
   }
 
   // 3. Клинические рекомендации РФ
-  if (crRfItems.length) {
-    sections.push({
-      nav: 'filter',
-      bookId: 'cr-rf',
-      kind: 'Рекомендации',
-      title: 'Клинические рекомендации РФ',
-      countText: `${crRfItems.length} ${pluralForm(crRfItems.length, ['документ', 'документа', 'документов'])}`,
-      icon: SOURCE_ICON_BOOK,
-    });
-  }
+  sections.push({
+    nav: 'filter',
+    bookId: 'cr-rf',
+    kind: 'Минздрав России',
+    title: 'Клинические рекомендации РФ',
+    countText: crRfItems.length
+      ? `${crRfItems.length} ${pluralForm(crRfItems.length, ['документ', 'документа', 'документов'])} · Официальный рубрикатор`
+      : 'Официальный рубрикатор Минздрава РФ',
+    icon: SOURCE_ICON_SHIELD,
+  });
 
   // 4. Мои материалы (опускаем вниз в конец списка категорий)
   sections.push({
@@ -715,13 +716,35 @@ async function renderBookTiles() {
 // Render Results Grid
 function renderResults(results, showBack = false, calcResults = []) {
   const back = getBackState();
-  const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency' && activeBookFilter !== 'my-materials';
+  const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency' && activeBookFilter !== 'my-materials' && activeBookFilter !== 'cr-rf';
   const backTile = showBack
     ? `<div class="book-chapter-toolbar">
         <button class="back-tile" id="backToSourcesBtn">${back.label}</button>
         ${showBookDl ? renderDownloadButtonHtml(activeBookFilter) : ''}
       </div>`
     : '';
+
+  const isCrRf = activeBookFilter === 'cr-rf';
+  const crBannerHtml = isCrRf ? `
+    <div class="cr-official-banner">
+      <div class="cr-banner-badge">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-3zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-2.33v8.02z"/></svg>
+        <span>Минздрав России · Рубрикатор КР</span>
+      </div>
+      <h3 class="cr-banner-title">Клинические рекомендации РФ</h3>
+      <p class="cr-banner-desc">Официальный государственный реестр утвержденных клинических рекомендаций по гематологии и онкогематологии. Читайте структурированное резюме офлайн или переходите к полным версиям на сайте Минздрава.</p>
+      <div class="cr-banner-actions">
+        <a href="https://cr.minzdrav.gov.ru/" target="_blank" rel="noopener noreferrer" class="cr-btn-portal">
+          <span>Официальный портал</span>
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clip-rule="evenodd"/></svg>
+        </a>
+        <a href="https://cr.minzdrav.gov.ru/clin_recomend" target="_blank" rel="noopener noreferrer" class="cr-btn-search">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd"/></svg>
+          <span>Поиск в базе КР</span>
+        </a>
+      </div>
+    </div>
+  ` : '';
 
   const bindBack = () => {
     const backBtn = document.getElementById('backToSourcesBtn');
@@ -756,7 +779,7 @@ function renderResults(results, showBack = false, calcResults = []) {
   if (totalCount === 0) {
     itemCount.textContent = '0 записей';
     const isMyMaterials = activeBookFilter === 'my-materials';
-    articlesList.innerHTML = backTile + `
+    articlesList.innerHTML = backTile + crBannerHtml + `
       <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
         <p style="font-size: 0.95rem; font-weight: 500;">${isMyMaterials ? 'В разделе «Мои материалы» пока нет файлов' : 'Ничего не найдено'}</p>
         <p style="font-size: 0.8rem; margin-top: 4px;">${isMyMaterials ? 'Загрузите PDF, FB2, Markdown или TXT для оффлайн-доступа' : 'Попробуйте выбрать другой источник или поисковый запрос'}</p>
@@ -787,11 +810,18 @@ function renderResults(results, showBack = false, calcResults = []) {
     </article>
   `).join('');
 
-  articlesList.innerHTML = backTile + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
+  articlesList.innerHTML = backTile + crBannerHtml + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
     const bookTitle = item.source?.book_short || item.source?.book || 'Материал';
     const pageLabel = page ? `стр. ${page}` : (item.pages ? `${item.pages} стр.` : `стр. ${item.source?.pages || 1}`);
     const hasIcd = Array.isArray(item.icd10) && item.icd10.length > 0;
     const formatBadge = item.isCustom ? `<span class="tag-pill" style="color: var(--accent);">${getFormatBadgeLabel(item.format || 'pdf')}</span>` : '';
+    const isCr = item.source?.book_id === 'cr-rf' || Boolean(item.minzdrav_url);
+    const crLinks = isCr ? `
+      <div class="card-cr-actions">
+        ${item.minzdrav_url ? `<a href="${sanitizeHref(item.minzdrav_url)}" target="_blank" rel="noopener noreferrer" class="card-cr-btn" data-external-link="true" title="Открыть рекомендацию на сайте Минздрава РФ">Минздрав РФ ↗</a>` : ''}
+        ${item.pdf_url ? `<a href="${sanitizeHref(item.pdf_url)}" target="_blank" rel="noopener noreferrer" class="card-cr-btn card-cr-btn--pdf" data-external-link="true" title="Скачать официальный PDF-документ Минздрава">PDF Минздрава ⬇</a>` : ''}
+      </div>
+    ` : '';
 
     return `
       <article class="card-tile" data-id="${item.id}" data-page="${page || ''}" style="animation-delay: ${Math.min(index * 25, 200)}ms">
@@ -810,6 +840,8 @@ function renderResults(results, showBack = false, calcResults = []) {
               ${item.quick_facts.slice(0, 2).map(f => `<li>${f}</li>`).join('')}
             </ul>
           ` : ''}
+
+          ${crLinks}
         </div>
 
         <div class="card-footer-tags">
@@ -821,6 +853,13 @@ function renderResults(results, showBack = false, calcResults = []) {
   }).join('');
 
   bindBack();
+
+  // Изолируем клики по внешним ссылкам Минздрава от открытия модального окна ридера
+  articlesList.querySelectorAll('[data-external-link="true"]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  });
 
   // Click card to open modal (and jump to the found page) or open calculator
   articlesList.querySelectorAll('.card-tile[data-id]').forEach(card => {
