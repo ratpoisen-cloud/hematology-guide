@@ -827,10 +827,12 @@ function renderResults(results, showBack = false, calcResults = []) {
 
   articlesList.innerHTML = backTile + crBannerHtml + calcCardsHtml + results.map(({ item, page, snippet }, index) => {
     const bookTitle = item.source?.book_short || item.source?.book || 'Материал';
-    const pageLabel = page ? `стр. ${page}` : (item.pages ? `${item.pages} стр.` : `стр. ${item.source?.pages || 1}`);
+    const isCr = item.source?.book_id === 'cr-rf' || Boolean(item.minzdrav_url);
+    const pageLabel = isCr
+      ? (item.source?.year ? `${item.source.year} г.` : 'КР Минздрава')
+      : (page ? `стр. ${page}` : (item.pages ? `${item.pages} стр.` : `стр. ${item.source?.pages || 1}`));
     const hasIcd = Array.isArray(item.icd10) && item.icd10.length > 0;
     const formatBadge = item.isCustom ? `<span class="tag-pill" style="color: var(--accent);">${getFormatBadgeLabel(item.format || 'pdf')}</span>` : '';
-    const isCr = item.source?.book_id === 'cr-rf' || Boolean(item.minzdrav_url);
     const crLinks = isCr ? `
       <div class="card-cr-actions">
         ${item.minzdrav_url ? `<a href="${sanitizeHref(item.minzdrav_url)}" target="_blank" rel="noopener noreferrer" class="card-cr-btn" data-external-link="true" title="Открыть рекомендацию на сайте Минздрава РФ">Минздрав РФ ↗</a>` : ''}
