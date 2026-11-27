@@ -1277,6 +1277,16 @@ export function createReader({ parseMarkdown, getCatalog, isBookmarked, onToggle
             pageNum: Number(pdf.start || 1) + i,
           }));
           if (pdf.isCustom && pdf.customId) {
+            const catalog = getCatalog ? getCatalog() : [];
+            const itemInCat = catalog.find(x => x.id === article.id || x.customId === pdf.customId);
+            if (itemInCat) {
+              itemInCat.pages = actualTotal;
+              if (itemInCat.pdf) {
+                itemInCat.pdf.pages = actualTotal;
+                itemInCat.pdf.end = actualTotal;
+              }
+              if (itemInCat.source) itemInCat.source.pages = actualTotal;
+            }
             getCustomMaterial(pdf.customId).then(rec => {
               if (rec && rec.pages !== actualTotal) {
                 rec.pages = actualTotal;

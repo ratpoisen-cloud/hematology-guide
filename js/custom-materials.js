@@ -83,11 +83,13 @@ export async function inspectCustomFile(file) {
 
   if (format === 'pdf') {
     let pdf = null;
+    let blobUrl = null;
     try {
       const pdfjsLib = await getPdfJs();
-      const arrayBuffer = await file.arrayBuffer();
-      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const numPages = pdf.numPages || 1;
+      // Потоковый Blob URL вместо file.arrayBuffer() для надёжности и предотвращения OOM на файлах 15-50+ МБ
+      blobUrl = URL.createObjectURL(file);
+      pdf = await pdfjsLib.getDocument(blobUrl).promise;
+      const numPages = Number(pdf.numPages) || 1;
 
       let thumbnail = null;
       try {
@@ -110,6 +112,9 @@ export async function inspectCustomFile(file) {
       console.error('PDF inspection failed:', err);
       return { format: 'pdf', numPages: 1, thumbnail: null, title: file.name.replace(/\.[^/.]+$/, '') };
     } finally {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
       if (pdf) {
         try { pdf.destroy(); } catch (_) {}
       }
@@ -172,9 +177,9 @@ export async function inspectCustomFile(file) {
 }
 
 // Добавление пользовательского документа в IndexedDB
-export async function importCustomDocument({ file, title, category, section }) {
+export async function importCustomDocument({ file, title, category, section, cachedInfo }) {
   if (!file) throw new Error('Файл не выбран');
-  const info = await inspectCustomFile(file);
+  const info = cachedInfo || await inspectCustomFile(file);
   const cleanTitle = (title || info.title || file.name.replace(/\.[^/.]+$/, '')).trim();
 
   const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -185,7 +190,7 @@ export async function importCustomDocument({ file, title, category, section }) {
     section: section || 'my-materials', // 'my-materials' | 'books' | 'emergency' | 'cr-rf'
     format: info.format,
     size: file.size,
-    pages: info.numPages,
+    pages: Number(info.numPages) || 1,
     blob: file,
     thumbnail: info.thumbnail,
     snippet: info.snippet || '',
@@ -265,7 +270,22 @@ export function customMaterialToCatalogItem(record) {
 // Загрузка всех пользовательских материалов в виде элементов каталога
 export async function loadCustomCatalogItems() {
   const records = await getAllCustomMaterials();
+
+  // Самоисцеление метаданных: если у ранее сохраненного PDF было ошибочно записано 1 стр. при реальном размере > 1 МБ,
+  // в фоне перепроверяем реальное число страниц и обновляем запись в IndexedDB
+  records.forEach((rec) => {
+    if (rec.format === 'pdf' && (Number(rec.pages) <= 1) && rec.blob && (rec.size > 500000)) {
+      inspectCustomFile(rec.blob).then((info) => {
+        if (info.numPages && info.numPages > 1 && info.numPages !== rec.pages) {
+          rec.pages = info.numPages;
+          if (info.thumbnail && !rec.thumbnail) rec.thumbnail = info.thumbnail;
+          saveCustomMaterial(rec).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  });
+
   return records.map(customMaterialToCatalogItem);
 }
 
-export { getCustomMaterial, deleteCustomMaterial, getAllCustomMaterials };
+export { getCustomMaterial, deleteCustomMaterial, getAllCustomMaterials, getPdfJs };

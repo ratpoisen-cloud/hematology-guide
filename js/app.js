@@ -861,8 +861,12 @@ reader = createReader({
     if (currentTab === 'bookmarks') renderBookmarks();
   },
   onClose: () => {
-    if (currentTab === 'search' && navLevel === 'my-materials') {
+    if (navLevel === 'my-materials') {
       renderMyMaterialsTiles();
+    } else if (navLevel === 'books') {
+      renderBookTiles();
+    } else if (currentTab === 'search') {
+      performSearch();
     }
   },
 });
@@ -1723,6 +1727,7 @@ function showToast(text, duration = 2800) {
 // ==========================================================================
 let customMaterialsInitialized = false;
 let pendingUploadFile = null;
+let pendingFileInfo = null;
 
 async function renderCustomMaterialsList() {
   const container = document.getElementById('customMaterialsList');
@@ -1849,10 +1854,11 @@ function initCustomMaterialsModule() {
     const fmtBadge = getFormatBadgeLabel(format);
 
     let displayTitle = file.name.replace(/\.[^/.]+$/, '');
+    pendingFileInfo = null;
     try {
-      const info = await inspectCustomFile(file);
-      if (info && info.title) {
-        displayTitle = info.title;
+      pendingFileInfo = await inspectCustomFile(file);
+      if (pendingFileInfo && pendingFileInfo.title) {
+        displayTitle = pendingFileInfo.title;
       }
     } catch (_) {}
 
@@ -1864,7 +1870,9 @@ function initCustomMaterialsModule() {
       sectionSelect.value = 'books';
     }
 
-    if (statusEl) statusEl.textContent = `Выбран файл (${fmtBadge}): ${file.name} (${formatFileSize(file.size)})`;
+    const pagesCount = pendingFileInfo?.numPages || 1;
+    const pagesLabel = `${pagesCount} ${pluralForm(pagesCount, ['страница', 'страницы', 'страниц'])}`;
+    if (statusEl) statusEl.textContent = `Выбран файл (${fmtBadge}): ${file.name} (${formatFileSize(file.size)}, ${pagesLabel})`;
   };
 
   chooseFileBtn?.addEventListener('click', () => fileInput?.click());
@@ -1898,6 +1906,7 @@ function initCustomMaterialsModule() {
 
   cancelBtn?.addEventListener('click', () => {
     pendingUploadFile = null;
+    pendingFileInfo = null;
     if (fileInput) fileInput.value = '';
     if (uploadForm) uploadForm.style.display = 'none';
     if (dropZone) dropZone.style.display = 'flex';
@@ -1919,6 +1928,7 @@ function initCustomMaterialsModule() {
         title: titleInput?.value,
         category: categorySelect?.value,
         section: sectionSelect?.value || 'my-materials',
+        cachedInfo: pendingFileInfo,
       });
 
       const catalogItem = customMaterialToCatalogItem(rec);
@@ -1942,6 +1952,7 @@ function initCustomMaterialsModule() {
 
       // Reset
       pendingUploadFile = null;
+      pendingFileInfo = null;
       if (fileInput) fileInput.value = '';
       if (uploadForm) uploadForm.style.display = 'none';
       if (dropZone) dropZone.style.display = 'flex';
