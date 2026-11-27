@@ -433,6 +433,7 @@ function getBackState() {
 }
 
 function renderSectionTiles() {
+  navTitle.textContent = 'Источники';
   const visualItems = catalogData.filter(a => a.type === 'visual' || a.type === 'fb2' || a.targetSection === 'books');
   const bookIds = new Set(visualItems.map(a => a.source?.book_id).filter(Boolean));
   const emergencyItems = catalogData.filter(a => a.source?.book_id === 'emergency' || a.targetSection === 'emergency');
@@ -518,6 +519,7 @@ function renderSectionTiles() {
 
 // Интерфейс «Мои материалы» в едином стиле учебников
 async function renderMyMaterialsTiles() {
+  navTitle.textContent = 'Мои материалы';
   const customItems = catalogData.filter(a => a.isCustom);
   itemCount.textContent = `${customItems.length} ${pluralForm(customItems.length, ['материал', 'материала', 'материалов'])}`;
 
@@ -676,6 +678,7 @@ onOfflineStateChange((bookId, state) => {
 });
 
 async function renderBookTiles() {
+  navTitle.textContent = 'Учебники';
   offlineSummaryMap = await getAllOfflineSummaryMap();
   const groups = new Map();
   catalogData.filter(a => a.type === 'visual' || a.type === 'fb2' || a.targetSection === 'books' || a.source?.book_id === 'custom-books').forEach(item => {
@@ -905,6 +908,22 @@ function renderOnlineBlockHtml(query) {
 // Render Results Grid
 function renderResults(results, showBack = false, calcResults = []) {
   const query = searchInput.value.trim();
+
+  if (!query) {
+    if (activeBookFilter === 'cr-rf') {
+      navTitle.textContent = 'Клинрекомендации РФ';
+    } else if (activeBookFilter === 'emergency') {
+      navTitle.textContent = 'Неотложные протоколы';
+    } else if (activeBookFilter && activeBookFilter !== 'all') {
+      const match = catalogData.find(a => (a.source?.book_id || a.id) === activeBookFilter);
+      navTitle.textContent = match?.source?.book_short || match?.source?.book || match?.title || 'Учебник';
+    } else {
+      navTitle.textContent = 'Источники';
+    }
+  } else {
+    navTitle.textContent = 'Результаты поиска';
+  }
+
   const back = getBackState();
   const showBookDl = showBack && activeBookFilter && activeBookFilter !== 'all' && activeBookFilter !== 'emergency' && activeBookFilter !== 'my-materials' && activeBookFilter !== 'cr-rf';
   const backTile = showBack
@@ -1589,7 +1608,20 @@ function initHomeScreen() {
 
   document.querySelectorAll('[data-home-nav]').forEach((tile) => {
     tile.addEventListener('click', () => {
-      navigateToTab(tile.getAttribute('data-home-nav'));
+      const nav = tile.getAttribute('data-home-nav');
+      if (nav === 'books') {
+        navigateToTab('search', { navLevel: 'books', bookFilter: 'all' });
+      } else if (nav === 'cr-rf') {
+        navigateToTab('search', { navLevel: 'articles', bookFilter: 'cr-rf' });
+      } else if (nav === 'emergency') {
+        navigateToTab('search', { navLevel: 'articles', bookFilter: 'emergency' });
+      } else if (nav === 'my-materials') {
+        navigateToTab('search', { navLevel: 'my-materials', bookFilter: 'my-materials' });
+      } else if (nav === 'sources' || nav === 'search') {
+        navigateToTab('search', { navLevel: 'sources', bookFilter: 'all' });
+      } else {
+        navigateToTab(nav);
+      }
     });
   });
 
@@ -1609,7 +1641,7 @@ function initHomeScreen() {
   });
 
   homeSearchBtn?.addEventListener('click', () => {
-    navigateToTab('search');
+    navigateToTab('search', { navLevel: 'sources', bookFilter: 'all' });
     requestAnimationFrame(() => searchInput?.focus());
   });
 
@@ -1617,7 +1649,7 @@ function initHomeScreen() {
   homeWidgetSearch?.addEventListener('input', (e) => renderWidgetPickerOptions(e.target.value));
 }
 
-function navigateToTab(tab) {
+function navigateToTab(tab, options = {}) {
   currentTab = tab;
   const isHome = tab === 'home';
 
@@ -1648,8 +1680,20 @@ function navigateToTab(tab) {
     calcView.style.display = 'none';
     bookmarksView.style.display = 'none';
     searchContainer.style.display = 'flex';
-    navTitle.textContent = 'Источники';
     itemCount.style.display = 'block';
+
+    if (options.navLevel) {
+      navLevel = options.navLevel;
+      activeBookFilter = options.bookFilter || 'all';
+    } else if (options.reset !== false) {
+      navLevel = 'sources';
+      activeBookFilter = 'all';
+    }
+
+    searchInput.value = '';
+    clearSearchBtn.style.display = 'none';
+    crSearchOnlineActive = false;
+    updateBookChipStates();
     performSearch();
   } else if (tab === 'calc') {
     searchView.style.display = 'none';
@@ -1677,7 +1721,12 @@ function navigateToTab(tab) {
 // Bottom Dock Navigation
 dockButtons.forEach(btn => {
   btn.addEventListener('click', () => {
-    navigateToTab(btn.getAttribute('data-tab'));
+    const tab = btn.getAttribute('data-tab');
+    if (tab === 'search') {
+      navigateToTab('search', { navLevel: 'sources', bookFilter: 'all' });
+    } else {
+      navigateToTab(tab);
+    }
   });
 });
 
